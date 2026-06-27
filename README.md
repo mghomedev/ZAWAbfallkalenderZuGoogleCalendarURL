@@ -27,6 +27,13 @@ Pro Abholung entstehen bis zu **zwei** Kalender-Eintraege:
 - **morgens am Abholtag** -- ganztaegiger, sichtbarer Eintrag
 - **Vorabend** (Standard 22:00) -- Termin mit VALARM ("Tonne rausstellen")
 
+### Immer aktuell
+
+Die Termine werden **bei jedem Abruf live** von der ZAW-API geholt -- es gibt
+keinen Cache und keinen Cron-Job. Wenn die ZAW Termine verschiebt (z.B. wegen
+Feiertagen), sind die Aenderungen beim naechsten Poll durch Google Kalender
+(alle ~8-24 h) automatisch sichtbar. Es ist kein manuelles Update noetig.
+
 > **Hinweis:** Google ignoriert VALARM in abonnierten Kalendern. Die Vorabend-Eintraege
 > sind sichtbar, piepen aber nicht. Apple Kalender und Thunderbird ehren VALARM.
 

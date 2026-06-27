@@ -281,7 +281,10 @@ INDEX_HTML = r"""<!DOCTYPE html>
       <a class="btn btn-gcal" id="btn-gcal" href="#" target="_blank">+ Google Kalender</a>
     </div>
     <p class="note">
-      Google pollt den Feed alle ~8&ndash;24 h automatisch.
+      <strong>Immer aktuell:</strong> Die Termine werden bei jedem Abruf live von der ZAW-API geholt &ndash;
+      kein Cache, kein Cron. Wenn die ZAW Termine verschiebt (z.B. wegen Feiertagen), sind die
+      &Auml;nderungen beim n&auml;chsten Poll durch Google Kalender (alle ~8&ndash;24 h) automatisch sichtbar.
+      <br><br>
       Die Vorabend-Eintr&auml;ge sind sichtbar; in Google piepen sie aber nicht (VALARM-Einschr&auml;nkung).
       Apple Kalender und Thunderbird ehren VALARM.
     </p>
