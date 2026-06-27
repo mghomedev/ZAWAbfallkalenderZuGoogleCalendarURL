@@ -212,6 +212,8 @@ INDEX_HTML = r"""<!DOCTYPE html>
   .spinner { display: none; width: 1rem; height: 1rem; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; margin-left: .5rem; vertical-align: middle; }
   .spinner.active { display: inline-block; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .prefill-link { display: block; margin-top: .75rem; font-size: .8rem; color: var(--muted); text-align: center; text-decoration: underline; cursor: pointer; }
+  .prefill-link:hover { color: var(--accent); }
   .disclaimer { max-width: 520px; margin-top: 2rem; padding: 1rem; font-size: .72rem; color: var(--muted); line-height: 1.5; text-align: center; }
   .note { margin-top: 1rem; font-size: .8rem; color: var(--muted); line-height: 1.4; }
   .how-to { max-width: 520px; margin-top: 1.5rem; }
@@ -281,6 +283,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
       <button class="btn btn-copy" id="btn-copy" onclick="copyUrl()">In Zwischenablage kopieren</button>
       <a class="btn btn-gcal" id="btn-gcal" href="#" target="_blank">+ Google Kalender</a>
     </div>
+    <a id="btn-prefill" href="#" class="prefill-link">Diese Auswahl als vorausgef&uuml;llte URL</a>
     <p class="note">
       <strong>Immer aktuell:</strong> Die Termine werden bei jedem Abruf live von der ZAW-API geholt &ndash;
       kein Cache, kein Cron. Wenn die ZAW Termine verschiebt (z.B. wegen Feiertagen), sind die
@@ -334,6 +337,7 @@ const resultEl = document.getElementById("result");
 const urlBox = document.getElementById("url-box");
 const btnGcal = document.getElementById("btn-gcal");
 const btnCopy = document.getElementById("btn-copy");
+const btnPrefill = document.getElementById("btn-prefill");
 
 // Pre-fill eve/morn from URL
 if (QS.eve) eveEl.value = QS.eve;
@@ -553,6 +557,7 @@ function updateUrl() {
   const url = BASE + "/feed?" + p.toString();
   urlBox.textContent = url;
   btnGcal.href = "https://calendar.google.com/calendar/u/0/r/settings/addbyurl?url=" + encodeURIComponent(url);
+  btnPrefill.href = BASE + "/?" + p.toString();
   resultEl.classList.add("visible");
   btnCopy.textContent = "In Zwischenablage kopieren";
 }
