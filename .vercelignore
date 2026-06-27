@@ -1,0 +1,6 @@
+# Nicht ins Vercel-Deployment hochladen (nur Entwicklung/Test)
+tests/
+requirements-dev.txt
+pytest.ini
+.pytest_cache/
+zaw-abfall-sync.zip

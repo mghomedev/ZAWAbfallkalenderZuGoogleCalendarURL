@@ -23,15 +23,34 @@ ihres APIs auf diese Weise nicht mehr möchte.
 ## Architektur
 - `zaw_ics_gen.py` — Kernlogik: jumomind-API abfragen, ICS erzeugen.
   Alle Funktionen nehmen Parameter entgegen (kein globaler State).
+  Reine, unit-testbare Helfer: `build_ics(...)`, `filter_dates_by_trash(...)`.
   CLI-Modus liest aus `.env` / Umgebungsvariablen.
-- `api/feed.py` — Vercel Serverless Function (BaseHTTPRequestHandler).
-  URL-Parameter `city`, `street`, `nr`, optional `name`.
-  Importiert `get_schedule` und `build_ics` aus `zaw_ics_gen`.
+  API-Basis über `ZAW_API_BASE` überschreibbar (`api_base()`), für Tests/Mock.
+- `api/index.py` — **einziger** Vercel-Entrypoint (BaseHTTPRequestHandler).
+  Routen: `/` (Picker-HTML inline), `/feed` (+`/api/feed`), `/api/cities`,
+  `/api/streets`, `/api/trash`. URL-Parameter des Feeds: `city`, `nr` (Pflicht),
+  `street` (optional – nur bei Gemeinden mit Straßen), `name`, `types`
+  (exakte API-Namen, z.B. `ZAW_REST_2W`), `eve` (HH:MM oder `off`),
+  `morn` (`allday`|HH:MM|`off`). Liest `ZAW_API_BASE` per Request (`_api()`).
+- `pyproject.toml` — `[tool.vercel] entrypoint = "api.index:handler"` + Deps.
 - `vercel.json` — Rewrite `/feed` → `/api/feed`.
 
 ## WICHTIGE Stolperfalle
 **Google ignoriert VALARM in abonnierten Kalendern.** Die 22-Uhr-Einträge sind
 sichtbar, piepen aber nicht. VALARM bleibt im Feed (Apple/Thunderbird ehren sie).
+
+## Tests (vor dem Deploy)
+Offline-Selbsttest mit Mock-ZAW + echter Function + headless Chromium:
+```bash
+pip install -r requirements-dev.txt && python -m playwright install chromium
+python -m pytest
+```
+`tests/mock_zaw.py` (deterministischer ZAW-Mock, zählt Upstream-Requests),
+`tests/conftest.py` (startet Mock + echte Function lokal). Deckt u.a. den
+Prefill-Roundtrip und alle Picker-Kombinationen ab. **Vor jedem Deploy grün.**
+
+Hinweis: Code ist 3.10+-kompatibel (keine Backslashes in f-string-Ausdrücken);
+Vercel nutzt 3.12. Auf Windows braucht `zoneinfo` das `tzdata`-Paket.
 
 ## Befehle (lokal)
 ```bash

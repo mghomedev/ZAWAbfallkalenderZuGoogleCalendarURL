@@ -28,7 +28,10 @@ import requests
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from zaw_ics_gen import get_schedule, build_ics, resolve_address, fetch_trash_types  # noqa: E402
 
-API = "https://zaw.jumomind.com/mmapp/api.php"
+
+def _api() -> str:
+    """ZAW-API-Basis. Über ZAW_API_BASE überschreibbar (z.B. für Tests/Mock)."""
+    return os.environ.get("ZAW_API_BASE", "https://zaw.jumomind.com/mmapp/api.php")
 
 
 class handler(BaseHTTPRequestHandler):
@@ -63,14 +66,16 @@ class handler(BaseHTTPRequestHandler):
         street = _first(params, "street")
         nr = _first(params, "nr")
 
-        if not city or not street or not nr:
+        # street ist optional: Gemeinden ohne Straßenauswahl (has_streets=false)
+        # liefern auch ohne street-Parameter einen Feed.
+        if not city or not nr:
             self._text(400,
-                "Pflichtparameter fehlen: city, street, nr\n\n"
+                "Pflichtparameter fehlen: city, nr (street nur bei Gemeinden mit Straßen)\n\n"
                 "Beispiel: /feed?city=Meine-Gemeinde&street=Meine+Stra%C3%9Fe&nr=1\n"
                 "\nOptionale Parameter:\n"
                 "  name    – Kalender-Anzeigename\n"
-                "  types   – Abfalltypen kommagetrennt (z.B. bio,papier,restm,gelb,schad)\n"
-                "  eve     – Vorabend-Uhrzeit (z.B. 22:00, leer = keine Vorabend-Einträge)\n"
+                "  types   – Abfalltypen kommagetrennt (z.B. ZAW_BIO,ZAW_GELB)\n"
+                "  eve     – Vorabend-Uhrzeit (z.B. 22:00, oder off)\n"
                 "  morn    – Morgen-Modus: allday (default), HH:MM, oder off\n")
             return
 
@@ -94,7 +99,7 @@ class handler(BaseHTTPRequestHandler):
             kw["morning_time"] = morn_mode
 
         try:
-            dates, _, _ = get_schedule("zaw", city, street, nr, trash_filter=trash_filter)
+            dates, _, _ = get_schedule("zaw", city, street or "", nr, trash_filter=trash_filter)
             ics = build_ics(dates, cal_name=cal_name, **kw)
         except ValueError as ex:
             self._text(404, str(ex))
@@ -112,7 +117,7 @@ class handler(BaseHTTPRequestHandler):
 
     def _handle_cities(self):
         try:
-            data = requests.get(API, params={"r": "cities_web"}, timeout=30).json()
+            data = requests.get(_api(), params={"r": "cities_web"}, timeout=30).json()
             cities = sorted(
                 [{"id": c["id"], "name": c["name"], "area_id": c["area_id"],
                   "has_streets": c["has_streets"]} for c in data],
@@ -128,7 +133,7 @@ class handler(BaseHTTPRequestHandler):
             self._json(400, {"error": "city_id parameter required"})
             return
         try:
-            data = requests.get(API, params={"r": "streets", "city_id": city_id}, timeout=30).json()
+            data = requests.get(_api(), params={"r": "streets", "city_id": city_id}, timeout=30).json()
             streets = sorted(
                 [{"name": s["name"], "area_id": s["area_id"],
                   "house_numbers": s.get("houseNumbers", [])} for s in data],
@@ -492,15 +497,22 @@ async function loadTrash(cityId, areaId) {
     const res = await fetch(BASE + "/api/trash?city_id=" + cityId + "&area_id=" + areaId);
     trashTypes = await res.json();
     trashChecks.innerHTML = "";
-    const typeFilter = QS.types ? QS.types.split(",").map(t => t.trim().toLowerCase()) : null;
+    // Schlüssel aus der URL (kleingeschrieben). Spiegelt die Backend-Filterlogik:
+    // ein Typ ist angehakt, wenn ein Schlüssel == API-Name, Teil des API-Namens
+    // oder Teil des Titels ist (case-insensitiv). So entspricht der Haken exakt
+    // dem, was der Feed tatsächlich liefert.
+    const typeKeys = QS.types
+      ? QS.types.split(",").map(t => t.trim().toLowerCase()).filter(Boolean)
+      : null;
     trashTypes.forEach(t => {
       const lbl = document.createElement("label");
       const cb = document.createElement("input");
       cb.type = "checkbox";
       cb.value = t.name;
-      // Pre-fill: if types param given, only check matching ones (exact API name match)
-      if (typeFilter) {
-        cb.checked = typeFilter.includes(t.name);
+      if (typeKeys) {
+        const n = (t.name || "").toLowerCase();
+        const tl = (t.title || "").toLowerCase();
+        cb.checked = typeKeys.some(k => k === n || n.includes(k) || tl.includes(k));
       } else {
         cb.checked = true;
       }

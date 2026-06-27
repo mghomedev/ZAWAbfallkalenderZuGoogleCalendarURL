@@ -54,6 +54,12 @@ EMOJI_MAP = [
 
 API_URL = "https://{provider}.jumomind.com/mmapp/api.php"
 
+
+def api_base(service_id: str) -> str:
+    """API-Basis-URL. Über ZAW_API_BASE überschreibbar (z.B. für Tests/Mock)."""
+    override = os.environ.get("ZAW_API_BASE")
+    return override if override else API_URL.format(provider=service_id)
+
 # --------------------------------------------------------------------------- #
 # Defaults für optionale Parameter
 # --------------------------------------------------------------------------- #
@@ -110,7 +116,7 @@ def resolve_address(
     house_number: str,
 ) -> tuple[str, str]:
     """Löst Gemeinde + Straße(+Hausnr.) in (city_id, area_id) auf."""
-    api = API_URL.format(provider=service_id)
+    api = api_base(service_id)
     city_lower = city.lower().strip()
     house = house_number.lower().strip().lstrip("0") or None
 
@@ -148,7 +154,7 @@ def resolve_address(
 
 
 def fetch_trash_names(session: requests.Session, service_id: str, city_id, area_id) -> dict[str, str]:
-    api = API_URL.format(provider=service_id)
+    api = api_base(service_id)
     data = session.get(api, params={"r": "trash", "city_id": city_id, "area_id": area_id}, timeout=30).json()
     m: dict[str, str] = {}
     for b in data:
@@ -158,7 +164,7 @@ def fetch_trash_names(session: requests.Session, service_id: str, city_id, area_
 
 
 def fetch_dates(session: requests.Session, service_id: str, city_id, area_id, names) -> list[tuple[dt.date, str]]:
-    api = API_URL.format(provider=service_id)
+    api = api_base(service_id)
     data = session.get(api, params={"r": "dates/0", "city_id": city_id, "area_id": area_id, "ws": 3},
                        timeout=30).json()
     out = [(dt.datetime.strptime(e["day"], "%Y-%m-%d").date(),
@@ -169,9 +175,35 @@ def fetch_dates(session: requests.Session, service_id: str, city_id, area_id, na
 
 def fetch_trash_types(session: requests.Session, service_id: str, city_id, area_id) -> list[dict]:
     """Gibt die verfügbaren Abfalltypen als Liste von {name, title} zurück."""
-    api = API_URL.format(provider=service_id)
+    api = api_base(service_id)
     data = session.get(api, params={"r": "trash", "city_id": city_id, "area_id": area_id}, timeout=30).json()
     return [{"name": b["name"], "title": b["title"]} for b in data]
+
+
+def filter_dates_by_trash(
+    dates: list[tuple[dt.date, str]],
+    names: dict[str, str],
+    trash_filter: list[str] | None,
+) -> list[tuple[dt.date, str]]:
+    """Filtert die Terminliste auf die gewünschten Abfalltypen.
+
+    `trash_filter` ist eine Liste von Schlüsseln. Bevorzugt exakte API-Namen
+    (z.B. "ZAW_REST_2W"), akzeptiert aber auch Teil-Schlüssel (z.B. "bio").
+    Ein Schlüssel matcht einen Abfalltyp, wenn er (case-insensitiv) gleich dem
+    API-Namen ist, ein Substring des API-Namens ist, oder ein Substring des
+    Titels ist. Ohne Filter wird die Liste unverändert zurückgegeben.
+
+    Reine Funktion – ohne Netzwerk, unit-testbar.
+    """
+    if not trash_filter:
+        return dates
+    keys = [k.lower() for k in trash_filter]
+    allowed = set()
+    for api_name, title in names.items():
+        an, tl = api_name.lower(), title.lower()
+        if any(k == an or k in an or k in tl for k in keys):
+            allowed.add(title)
+    return [(d, t) for d, t in dates if t in allowed]
 
 
 def get_schedule(
@@ -183,23 +215,14 @@ def get_schedule(
 ) -> tuple[list[tuple[dt.date, str]], str, str]:
     """Holt den Abfuhrplan für eine Adresse. Gibt (dates, city_id, area_id) zurück.
 
-    trash_filter: Liste von Abfalltyp-Schlüsseln (z.B. ["bio", "papier"]).
-    Wenn gesetzt, werden nur Termine zurückgegeben, deren Titel einen der
-    Schlüssel als Substring enthält (case-insensitive).
+    trash_filter: siehe filter_dates_by_trash().
     """
     s = requests.Session()
     s.headers.update({"Accept-Encoding": "identity"})
     city_id, area_id = resolve_address(s, service_id, city, street, house_number)
     names = fetch_trash_names(s, service_id, city_id, area_id)
     dates = fetch_dates(s, service_id, city_id, area_id, names)
-    if trash_filter:
-        keys = [k.lower() for k in trash_filter]
-        # Build set of allowed titles by matching filter keys against API names AND titles
-        allowed = set()
-        for api_name, title in names.items():
-            if any(k == api_name.lower() or k in api_name.lower() or k in title.lower() for k in keys):
-                allowed.add(title)
-        dates = [(d, t) for d, t in dates if t in allowed]
+    dates = filter_dates_by_trash(dates, names, trash_filter)
     return dates, city_id, area_id
 
 
@@ -305,8 +328,8 @@ def build_ics(
                 end = (dt.datetime.combine(day, dt.time(morn_h, morn_m), TZ)
                        + dt.timedelta(minutes=dur)).astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
                 L.append(f"DTEND:{end}")
-            L.append(f"SUMMARY:{_esc(label + ' \u2013 Abholung')}")
-            L.append(f"DESCRIPTION:{_esc(title + ' \u00b7 Quelle: ZAW (zaw-online.de)')}")
+            L.append(f"SUMMARY:{_esc(label + ' – Abholung')}")
+            L.append(f"DESCRIPTION:{_esc(title + ' · Quelle: ZAW (zaw-online.de)')}")
             L.append("END:VEVENT")
 
         # --- 2) Erinnerung am Vorabend (mit VALARM) ---
@@ -321,7 +344,7 @@ def build_ics(
             end = (dt.datetime.combine(eday, dt.time(eve_h, eve_m), TZ)
                    + dt.timedelta(minutes=dur)).astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
             L.append(f"DTEND:{end}")
-            L.append(f"SUMMARY:{_esc('\U0001f514 ' + label + ' morgen fr\u00fch \u2013 Tonne rausstellen')}")
+            L.append(f"SUMMARY:{_esc('🔔 ' + label + ' morgen früh – Tonne rausstellen')}")
             morgen = day.strftime("%a %d.%m.")
             desc = (f"Morgen ({morgen}) wird abgeholt: {title}. "
                     "ZAW sammelt z.T. ab 05:00 Uhr \u2013 heute Abend bereitstellen.")

@@ -104,5 +104,33 @@ python3 zaw_ics_gen.py --stdout       # ICS zur Sichtpruefung
   erzeugt eine RFC-5545-konforme ICS-Datei.
 - `api/index.py` -- Vercel Serverless Function: Landing Page, Feed-Endpunkt,
   Gemeinde/Strassen/Abfalltyp-APIs fuer den Picker.
-- Kein Caching noetig, kein Cron -- bei jedem Abruf werden live die aktuellen
-  Termine geholt.
+- Bei jedem Abruf werden live die aktuellen Termine geholt (kein Cron).
+
+---
+
+## Tests (Selbst-Test, lokal -- vor dem Deploy)
+
+Ein vollstaendiger Selbst-Test laeuft **offline**: ein Mock des ZAW-API und die
+echte Vercel-Function werden lokal als HTTP-Server gestartet, ein **headless
+Chromium** bedient den Picker. Es wird **kein** echter ZAW-Server getroffen und
+nichts nach Vercel deployt.
+
+```bash
+pip install -r requirements-dev.txt
+python -m playwright install chromium
+python -m pytest            # alle Tests (Unit + HTTP + Browser)
+python -m pytest -m "not ui" # nur ohne Browser
+```
+
+Abgedeckt:
+
+- **Unit** (`tests/test_unit_build_ics.py`): RFC-5545-Struktur/Faltung, DST
+  (22:00 lokal -> Winter 21:00Z / Sommer 20:00Z), stabile UIDs, eve/morn an/aus,
+  exakte Abfalltyp-Filterung (`ZAW_REST_2W` vs `ZAW_REST_W`).
+- **HTTP** (`tests/test_api_feed.py`): `/feed` und `/api/*`, Fehlerfaelle,
+  Inhaltspruefung, Gemeinde ohne Strassen.
+- **Browser** (`tests/test_picker_ui.py`): **alle** Kombinationen aus
+  Abfalltyp-Teilmengen x Vorabend(6) x Abholtag(5), Korrektheit aller drei
+  erzeugten URLs (Feed / Google / vorausgefuellt), tatsaechlicher Abruf der
+  Feed-URLs und **Prefill-Roundtrip** (vorausgefuellte URL laden -> Auswahl exakt
+  wiederhergestellt).

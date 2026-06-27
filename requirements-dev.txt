@@ -1,0 +1,6 @@
+# Test-/Entwicklungs-Abhängigkeiten (nicht für das Vercel-Deployment nötig)
+pytest>=8.0
+pytest-playwright>=0.5
+playwright>=1.40
+requests>=2.31
+tzdata>=2024.1  # nur auf Windows nötig (kein System-Zeitzonen-DB)
