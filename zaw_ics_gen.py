@@ -167,18 +167,35 @@ def fetch_dates(session: requests.Session, service_id: str, city_id, area_id, na
     return out
 
 
+def fetch_trash_types(session: requests.Session, service_id: str, city_id, area_id) -> list[dict]:
+    """Gibt die verfügbaren Abfalltypen als Liste von {name, title} zurück."""
+    api = API_URL.format(provider=service_id)
+    data = session.get(api, params={"r": "trash", "city_id": city_id, "area_id": area_id}, timeout=30).json()
+    return [{"name": b["name"], "title": b["title"]} for b in data]
+
+
 def get_schedule(
     service_id: str,
     city: str,
     street: str,
     house_number: str,
+    trash_filter: list[str] | None = None,
 ) -> tuple[list[tuple[dt.date, str]], str, str]:
-    """Holt den Abfuhrplan für eine Adresse. Gibt (dates, city_id, area_id) zurück."""
+    """Holt den Abfuhrplan für eine Adresse. Gibt (dates, city_id, area_id) zurück.
+
+    trash_filter: Liste von Abfalltyp-Schlüsseln (z.B. ["bio", "papier"]).
+    Wenn gesetzt, werden nur Termine zurückgegeben, deren Titel einen der
+    Schlüssel als Substring enthält (case-insensitive).
+    """
     s = requests.Session()
     s.headers.update({"Accept-Encoding": "identity"})
     city_id, area_id = resolve_address(s, service_id, city, street, house_number)
     names = fetch_trash_names(s, service_id, city_id, area_id)
-    return fetch_dates(s, service_id, city_id, area_id, names), city_id, area_id
+    dates = fetch_dates(s, service_id, city_id, area_id, names)
+    if trash_filter:
+        keys = [k.lower() for k in trash_filter]
+        dates = [(d, t) for d, t in dates if any(k in t.lower() for k in keys)]
+    return dates, city_id, area_id
 
 
 def pretty_label(title: str) -> str:
