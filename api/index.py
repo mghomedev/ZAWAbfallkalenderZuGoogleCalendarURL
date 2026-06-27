@@ -318,6 +318,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
 
 <script>
 const BASE = location.origin;
+const QS = Object.fromEntries(new URLSearchParams(location.search));
 let streetsData = [], selectedCity = null, trashTypes = [];
 
 const cityEl = document.getElementById("city");
@@ -334,6 +335,10 @@ const urlBox = document.getElementById("url-box");
 const btnGcal = document.getElementById("btn-gcal");
 const btnCopy = document.getElementById("btn-copy");
 
+// Pre-fill eve/morn from URL
+if (QS.eve) eveEl.value = QS.eve;
+if (QS.morn) mornEl.value = QS.morn;
+
 async function loadCities() {
   try {
     const res = await fetch(BASE + "/api/cities");
@@ -348,13 +353,20 @@ async function loadCities() {
       cityEl.appendChild(o);
     });
     cityEl.disabled = false;
+    // Pre-fill city from URL
+    if (QS.city) {
+      for (const o of cityEl.options) {
+        if (o.textContent === QS.city) { cityEl.value = o.value; break; }
+      }
+      if (cityEl.value) await onCityChange();
+    }
   } catch (e) {
     cityEl.innerHTML = '<option value="">Fehler beim Laden</option>';
   }
   document.getElementById("city-spinner").classList.remove("active");
 }
 
-cityEl.addEventListener("change", async () => {
+async function onCityChange() {
   streetEl.innerHTML = '<option value="">Wird geladen...</option>';
   streetEl.disabled = true;
   hnGroup.style.display = "none";
@@ -388,13 +400,25 @@ cityEl.addEventListener("change", async () => {
       streetEl.appendChild(o);
     });
     streetEl.disabled = false;
+    // Pre-fill street from URL
+    if (QS.street) {
+      const norm = v => v.toLowerCase().replace(/stra\u00dfe/g,"strasse").replace(/str\./g,"strasse");
+      for (const o of streetEl.options) {
+        if (o.textContent === QS.street || norm(o.textContent) === norm(QS.street)) {
+          streetEl.value = o.value; break;
+        }
+      }
+      if (streetEl.value) await onStreetChange();
+    }
   } catch (e) {
     streetEl.innerHTML = '<option value="">Fehler beim Laden</option>';
   }
   spinner.classList.remove("active");
-});
+}
 
-streetEl.addEventListener("change", async () => {
+cityEl.addEventListener("change", onCityChange);
+
+async function onStreetChange() {
   hnGroup.style.display = "none";
   trashGroup.style.display = "none";
   resultEl.classList.remove("visible");
@@ -416,16 +440,30 @@ streetEl.addEventListener("change", async () => {
     hnInput.style.display = "none";
     hnGroup.style.display = "block";
     hnGroup.dataset.mode = "select";
+    // Pre-fill house number from URL (select mode)
+    if (QS.nr) {
+      for (const o of hnEl.options) {
+        if (o.value === QS.nr) { hnEl.value = o.value; break; }
+      }
+      if (hnEl.value) await onHnSelectChange();
+    }
   } else {
-    hnInput.value = "";
+    hnInput.value = QS.nr || "";
     hnInput.style.display = "";
     hnEl.style.display = "none";
     hnGroup.style.display = "block";
     hnGroup.dataset.mode = "input";
+    // Pre-fill house number from URL (input mode)
+    if (QS.nr) {
+      await loadTrash(selectedCity.id, street.area_id);
+      buildUrl(cityName, street.name, QS.nr);
+    }
   }
-});
+}
 
-hnEl.addEventListener("change", async () => {
+streetEl.addEventListener("change", onStreetChange);
+
+async function onHnSelectChange() {
   if (!hnEl.value) { resultEl.classList.remove("visible"); return; }
   const cityName = cityEl.options[cityEl.selectedIndex].textContent;
   const street = streetsData[parseInt(streetEl.value)];
@@ -434,7 +472,9 @@ hnEl.addEventListener("change", async () => {
   if (hn) areaId = hn[1];
   await loadTrash(selectedCity.id, areaId);
   buildUrl(cityName, street.name, hnEl.value);
-});
+}
+
+hnEl.addEventListener("change", onHnSelectChange);
 
 hnInput.addEventListener("input", async () => {
   const val = hnInput.value.trim();
@@ -451,12 +491,19 @@ async function loadTrash(cityId, areaId) {
     const res = await fetch(BASE + "/api/trash?city_id=" + cityId + "&area_id=" + areaId);
     trashTypes = await res.json();
     trashChecks.innerHTML = "";
+    const typeFilter = QS.types ? QS.types.split(",").map(t => t.trim().toLowerCase()) : null;
     trashTypes.forEach(t => {
       const lbl = document.createElement("label");
       const cb = document.createElement("input");
       cb.type = "checkbox";
-      cb.checked = true;
       cb.value = t.name;
+      // Pre-fill: if types param given, only check matching ones
+      if (typeFilter) {
+        const n = t.name.toLowerCase();
+        cb.checked = typeFilter.some(f => n.includes(f));
+      } else {
+        cb.checked = true;
+      }
       cb.addEventListener("change", updateUrl);
       lbl.appendChild(cb);
       lbl.appendChild(document.createTextNode(" " + t.title));
@@ -483,7 +530,6 @@ function updateUrl() {
   if (currentStreet) p.set("street", currentStreet);
   p.set("nr", currentNr || "1");
 
-  // Abfalltyp-Filter
   const allChecked = trashChecks.querySelectorAll("input[type=checkbox]");
   const checked = [...allChecked].filter(cb => cb.checked);
   if (checked.length > 0 && checked.length < allChecked.length) {
@@ -499,7 +545,6 @@ function updateUrl() {
     p.set("types", keys.join(","));
   }
 
-  // Erinnerungen
   const eve = eveEl.value;
   if (eve !== "22:00") p.set("eve", eve);
   const morn = mornEl.value;
