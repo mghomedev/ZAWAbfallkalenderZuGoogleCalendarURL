@@ -246,8 +246,10 @@ def build_ics(
     *,
     cal_name: str = DEFAULTS["cal_name"],
     uid_domain: str = DEFAULTS["uid_domain"],
+    morning_enabled: bool = True,
     morning_all_day: bool = DEFAULTS["morning_all_day"],
     morning_time: str = DEFAULTS["morning_time"],
+    evening_enabled: bool = True,
     evening_time: str = DEFAULTS["evening_time"],
     evening_offset_days: int = DEFAULTS["evening_offset_days"],
     event_duration_min: int = DEFAULTS["event_duration_min"],
@@ -285,44 +287,46 @@ def build_ics(
         label = pretty_label(title)
 
         # --- 1) Eintrag am Abholtag (morgens / ganztägig) ---
-        L.append("BEGIN:VEVENT")
-        L.append(f"UID:{_uid(day, title, 'm', uid_domain)}")
-        L.append(f"DTSTAMP:{stamp}")
-        if morning_all_day:
-            L.append(f"DTSTART;VALUE=DATE:{day.strftime('%Y%m%d')}")
-            L.append(f"DTEND;VALUE=DATE:{(day + dt.timedelta(days=1)).strftime('%Y%m%d')}")
-            L.append("TRANSP:TRANSPARENT")
-        else:
-            L.append(f"DTSTART:{_dt_utc(day, morn_h, morn_m)}")
-            end = (dt.datetime.combine(day, dt.time(morn_h, morn_m), TZ)
-                   + dt.timedelta(minutes=dur)).astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
-            L.append(f"DTEND:{end}")
-        L.append(f"SUMMARY:{_esc(label + ' \u2013 Abholung')}")
-        L.append(f"DESCRIPTION:{_esc(title + ' \u00b7 Quelle: ZAW (zaw-online.de)')}")
-        L.append("END:VEVENT")
+        if morning_enabled:
+            L.append("BEGIN:VEVENT")
+            L.append(f"UID:{_uid(day, title, 'm', uid_domain)}")
+            L.append(f"DTSTAMP:{stamp}")
+            if morning_all_day:
+                L.append(f"DTSTART;VALUE=DATE:{day.strftime('%Y%m%d')}")
+                L.append(f"DTEND;VALUE=DATE:{(day + dt.timedelta(days=1)).strftime('%Y%m%d')}")
+                L.append("TRANSP:TRANSPARENT")
+            else:
+                L.append(f"DTSTART:{_dt_utc(day, morn_h, morn_m)}")
+                end = (dt.datetime.combine(day, dt.time(morn_h, morn_m), TZ)
+                       + dt.timedelta(minutes=dur)).astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+                L.append(f"DTEND:{end}")
+            L.append(f"SUMMARY:{_esc(label + ' \u2013 Abholung')}")
+            L.append(f"DESCRIPTION:{_esc(title + ' \u00b7 Quelle: ZAW (zaw-online.de)')}")
+            L.append("END:VEVENT")
 
         # --- 2) Erinnerung am Vorabend (mit VALARM) ---
-        eday = day - dt.timedelta(days=evening_offset_days)
-        if eday < lo:
-            continue
-        L.append("BEGIN:VEVENT")
-        L.append(f"UID:{_uid(day, title, 'e', uid_domain)}")
-        L.append(f"DTSTAMP:{stamp}")
-        L.append(f"DTSTART:{_dt_utc(eday, eve_h, eve_m)}")
-        end = (dt.datetime.combine(eday, dt.time(eve_h, eve_m), TZ)
-               + dt.timedelta(minutes=dur)).astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
-        L.append(f"DTEND:{end}")
-        L.append(f"SUMMARY:{_esc('\U0001f514 ' + label + ' morgen fr\u00fch \u2013 Tonne rausstellen')}")
-        morgen = day.strftime("%a %d.%m.")
-        desc = (f"Morgen ({morgen}) wird abgeholt: {title}. "
-                "ZAW sammelt z.T. ab 05:00 Uhr \u2013 heute Abend bereitstellen.")
-        L.append(f"DESCRIPTION:{_esc(desc)}")
-        L.append("BEGIN:VALARM")
-        L.append("ACTION:DISPLAY")
-        L.append("DESCRIPTION:Tonne rausstellen")
-        L.append(f"TRIGGER:-PT{alarm_min_before}M")
-        L.append("END:VALARM")
-        L.append("END:VEVENT")
+        if evening_enabled:
+            eday = day - dt.timedelta(days=evening_offset_days)
+            if eday < lo:
+                continue
+            L.append("BEGIN:VEVENT")
+            L.append(f"UID:{_uid(day, title, 'e', uid_domain)}")
+            L.append(f"DTSTAMP:{stamp}")
+            L.append(f"DTSTART:{_dt_utc(eday, eve_h, eve_m)}")
+            end = (dt.datetime.combine(eday, dt.time(eve_h, eve_m), TZ)
+                   + dt.timedelta(minutes=dur)).astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+            L.append(f"DTEND:{end}")
+            L.append(f"SUMMARY:{_esc('\U0001f514 ' + label + ' morgen fr\u00fch \u2013 Tonne rausstellen')}")
+            morgen = day.strftime("%a %d.%m.")
+            desc = (f"Morgen ({morgen}) wird abgeholt: {title}. "
+                    "ZAW sammelt z.T. ab 05:00 Uhr \u2013 heute Abend bereitstellen.")
+            L.append(f"DESCRIPTION:{_esc(desc)}")
+            L.append("BEGIN:VALARM")
+            L.append("ACTION:DISPLAY")
+            L.append("DESCRIPTION:Tonne rausstellen")
+            L.append(f"TRIGGER:-PT{alarm_min_before}M")
+            L.append("END:VALARM")
+            L.append("END:VEVENT")
 
     L.append("END:VCALENDAR")
     return "\r\n".join(_fold(x) for x in L) + "\r\n"

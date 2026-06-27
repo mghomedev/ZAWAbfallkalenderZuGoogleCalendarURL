@@ -83,18 +83,15 @@ class handler(BaseHTTPRequestHandler):
         # Konfiguration aus URL-Parametern ableiten
         kw = {}
         if eve_time == "off" or eve_time == "":
-            kw["evening_offset_days"] = 0
-            kw["evening_time"] = "00:00"
+            kw["evening_enabled"] = False
         elif eve_time:
             kw["evening_time"] = eve_time
 
         if morn_mode == "off":
-            kw["morning_all_day"] = False
-            kw["days_back"] = 0
+            kw["morning_enabled"] = False
         elif morn_mode and morn_mode != "allday":
             kw["morning_all_day"] = False
             kw["morning_time"] = morn_mode
-        # default: morning_all_day=True
 
         try:
             dates, _, _ = get_schedule("zaw", city, street, nr, trash_filter=trash_filter)
@@ -557,7 +554,26 @@ function updateUrl() {
   const url = BASE + "/feed?" + p.toString();
   urlBox.textContent = url;
   btnGcal.href = "https://calendar.google.com/calendar/u/0/r/settings/addbyurl?url=" + encodeURIComponent(url);
-  btnPrefill.href = BASE + "/?" + p.toString();
+  // Vorausgefüllte URL enthält ALLE Parameter (auch Defaults), damit sie stabil bleibt
+  const pFull = new URLSearchParams(p);
+  if (!pFull.has("eve")) pFull.set("eve", eveEl.value);
+  if (!pFull.has("morn")) pFull.set("morn", mornEl.value);
+  if (!pFull.has("types")) {
+    const allCbs = trashChecks.querySelectorAll("input[type=checkbox]");
+    if (allCbs.length > 0) {
+      const keys = [...allCbs].filter(cb => cb.checked).map(cb => {
+        const n = cb.value.toLowerCase();
+        if (n.includes("bio")) return "bio";
+        if (n.includes("pap")) return "papier";
+        if (n.includes("gelb")) return "gelb";
+        if (n.includes("rest")) return "restm";
+        if (n.includes("schad")) return "schad";
+        return cb.value;
+      });
+      pFull.set("types", keys.join(","));
+    }
+  }
+  btnPrefill.href = BASE + "/?" + pFull.toString();
   resultEl.classList.add("visible");
   btnCopy.textContent = "In Zwischenablage kopieren";
 }
