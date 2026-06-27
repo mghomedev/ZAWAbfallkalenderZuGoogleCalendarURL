@@ -531,9 +531,10 @@ function updateUrl() {
   if (currentStreet) p.set("street", currentStreet);
   p.set("nr", currentNr || "1");
 
-  const allChecked = trashChecks.querySelectorAll("input[type=checkbox]");
-  const checked = [...allChecked].filter(cb => cb.checked);
-  if (checked.length > 0 && checked.length < allChecked.length) {
+  // Abfalltyp-Filter: immer alle gechecken Typen in die URL schreiben
+  const allCbs = [...trashChecks.querySelectorAll("input[type=checkbox]")];
+  const checked = allCbs.filter(cb => cb.checked);
+  if (checked.length > 0) {
     const keys = checked.map(cb => {
       const n = cb.value.toLowerCase();
       if (n.includes("bio")) return "bio";
@@ -546,34 +547,13 @@ function updateUrl() {
     p.set("types", keys.join(","));
   }
 
-  const eve = eveEl.value;
-  if (eve !== "22:00") p.set("eve", eve);
-  const morn = mornEl.value;
-  if (morn !== "allday") p.set("morn", morn);
+  p.set("eve", eveEl.value);
+  p.set("morn", mornEl.value);
 
   const url = BASE + "/feed?" + p.toString();
   urlBox.textContent = url;
   btnGcal.href = "https://calendar.google.com/calendar/u/0/r/settings/addbyurl?url=" + encodeURIComponent(url);
-  // Vorausgefüllte URL enthält ALLE Parameter (auch Defaults), damit sie stabil bleibt
-  const pFull = new URLSearchParams(p);
-  if (!pFull.has("eve")) pFull.set("eve", eveEl.value);
-  if (!pFull.has("morn")) pFull.set("morn", mornEl.value);
-  if (!pFull.has("types")) {
-    const allCbs = trashChecks.querySelectorAll("input[type=checkbox]");
-    if (allCbs.length > 0) {
-      const keys = [...allCbs].filter(cb => cb.checked).map(cb => {
-        const n = cb.value.toLowerCase();
-        if (n.includes("bio")) return "bio";
-        if (n.includes("pap")) return "papier";
-        if (n.includes("gelb")) return "gelb";
-        if (n.includes("rest")) return "restm";
-        if (n.includes("schad")) return "schad";
-        return cb.value;
-      });
-      pFull.set("types", keys.join(","));
-    }
-  }
-  btnPrefill.href = BASE + "/?" + pFull.toString();
+  btnPrefill.href = BASE + "/?" + p.toString();
   resultEl.classList.add("visible");
   btnCopy.textContent = "In Zwischenablage kopieren";
 }
