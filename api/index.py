@@ -20,13 +20,17 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
 import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from zaw_ics_gen import get_schedule, build_ics, resolve_address, fetch_trash_types  # noqa: E402
+from zaw_ics_gen import (  # noqa: E402
+    get_schedule, build_ics, resolve_address, fetch_trash_types,
+    cached_get_json, clear_cache,
+)
 
 
 def _api() -> str:
@@ -34,11 +38,70 @@ def _api() -> str:
     return os.environ.get("ZAW_API_BASE", "https://zaw.jumomind.com/mmapp/api.php")
 
 
+# --------------------------------------------------------------------------- #
+# Best-effort Rate-Limit pro IP (schützt App + ZAW vor Crawlern/Enumeration).
+# Hinweis: serverless -> nur pro warmer Instanz, nicht global. Die eigentliche
+# Verteidigung ist Edge-Caching (s-maxage) + Vercel WAF/Firewall (Dashboard).
+# --------------------------------------------------------------------------- #
+_RATE: dict[str, tuple[float, int]] = {}
+
+
+def _rate_per_min() -> int:
+    try:
+        return int(os.environ.get("ZAW_RATE_PER_MIN", "120"))
+    except ValueError:
+        return 120
+
+
+def clear_rate() -> None:
+    _RATE.clear()
+
+
+def _rate_ok(ip: str) -> bool:
+    limit = _rate_per_min()
+    if limit <= 0:
+        return True
+    now = time.monotonic()
+    win, cnt = _RATE.get(ip, (now, 0))
+    if now - win >= 60:
+        win, cnt = now, 0
+    cnt += 1
+    _RATE[ip] = (win, cnt)
+    return cnt <= limit
+
+
+ROBOTS_TXT = (
+    "User-agent: *\n"
+    "Allow: /$\n"
+    "Disallow: /api/\n"
+    "Disallow: /feed\n"
+)
+
+
 class handler(BaseHTTPRequestHandler):
+    def _client_ip(self) -> str:
+        xff = self.headers.get("x-forwarded-for")
+        if xff:
+            return xff.split(",")[0].strip()
+        return self.client_address[0] if self.client_address else "?"
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
         params = parse_qs(parsed.query)
+
+        if path == "/robots.txt":
+            self._text(200, ROBOTS_TXT, content_type="text/plain")
+            return
+
+        # Best-effort Rate-Limit (greift v.a. bei Cache-umgehender Enumeration).
+        if not _rate_ok(self._client_ip()):
+            self.send_response(429)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Retry-After", "60")
+            self.end_headers()
+            self.wfile.write(b"Too Many Requests\n")
+            return
 
         routes = {
             "/": self._handle_index,
@@ -110,14 +173,16 @@ class handler(BaseHTTPRequestHandler):
 
         self.send_response(200)
         self.send_header("Content-Type", "text/calendar; charset=utf-8")
-        self.send_header("Cache-Control", "public, max-age=3600, s-maxage=21600")
+        # 24h Edge-Cache: wiederholte Abrufe derselben Feed-URL (z.B. Googles
+        # Poller) werden von Vercels CDN bedient und treffen weder uns noch ZAW.
+        self.send_header("Cache-Control", "public, max-age=3600, s-maxage=86400")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(ics.encode())
 
     def _handle_cities(self):
         try:
-            data = requests.get(_api(), params={"r": "cities_web"}, timeout=30).json()
+            data = cached_get_json(None, _api(), {"r": "cities_web"})
             cities = sorted(
                 [{"id": c["id"], "name": c["name"], "area_id": c["area_id"],
                   "has_streets": c["has_streets"]} for c in data],
@@ -133,7 +198,7 @@ class handler(BaseHTTPRequestHandler):
             self._json(400, {"error": "city_id parameter required"})
             return
         try:
-            data = requests.get(_api(), params={"r": "streets", "city_id": city_id}, timeout=30).json()
+            data = cached_get_json(None, _api(), {"r": "streets", "city_id": city_id})
             streets = sorted(
                 [{"name": s["name"], "area_id": s["area_id"],
                   "house_numbers": s.get("houseNumbers", [])} for s in data],
@@ -166,9 +231,11 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _text(self, code, msg):
+    def _text(self, code, msg, content_type="text/plain; charset=utf-8"):
         self.send_response(code)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Type", content_type)
+        if code == 200:
+            self.send_header("Cache-Control", "public, s-maxage=86400, max-age=3600")
         self.end_headers()
         self.wfile.write(msg.encode())
 
@@ -287,9 +354,10 @@ INDEX_HTML = r"""<!DOCTYPE html>
     </div>
     <a id="btn-prefill" href="#" class="prefill-link">Diese Auswahl als vorausgef&uuml;llte URL</a>
     <p class="note">
-      <strong>Immer aktuell:</strong> Die Termine werden bei jedem Abruf live von der ZAW-API geholt &ndash;
-      kein Cache, kein Cron. Wenn die ZAW Termine verschiebt (z.B. wegen Feiertagen), sind die
-      &Auml;nderungen beim n&auml;chsten Poll durch Google Kalender (alle ~8&ndash;24 h) automatisch sichtbar.
+      <strong>Immer aktuell:</strong> Die Termine kommen direkt aus der ZAW-API &ndash; kein Cron,
+      keine manuelle Pflege. Zum Schutz der ZAW-Server werden Antworten bis zu 24 h
+      zwischengespeichert; Verschiebungen (z.B. wegen Feiertagen) erscheinen daher sp&auml;testens
+      nach ~24 h plus Googles Poll-Intervall (~8&ndash;24 h) automatisch.
       <br><br>
       Die Vorabend-Eintr&auml;ge sind sichtbar; in Google piepen sie aber nicht (VALARM-Einschr&auml;nkung).
       Apple Kalender und Thunderbird ehren VALARM.

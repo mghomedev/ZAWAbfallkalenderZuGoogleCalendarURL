@@ -36,6 +36,8 @@ import logging
 import os
 import sys
 import tempfile
+import time
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 import requests
@@ -59,6 +61,44 @@ def api_base(service_id: str) -> str:
     """API-Basis-URL. Über ZAW_API_BASE überschreibbar (z.B. für Tests/Mock)."""
     override = os.environ.get("ZAW_API_BASE")
     return override if override else API_URL.format(provider=service_id)
+
+
+# --------------------------------------------------------------------------- #
+# 24h-Cache für ZAW-Antworten – schützt die ZAW-Server vor wiederholten Abfragen
+# --------------------------------------------------------------------------- #
+_CACHE: dict[str, tuple[float, object]] = {}
+
+
+def _cache_ttl() -> int:
+    """Cache-Dauer in Sekunden (Default 24h). Über ZAW_CACHE_TTL einstellbar; 0 = aus."""
+    try:
+        return int(os.environ.get("ZAW_CACHE_TTL", "86400"))
+    except ValueError:
+        return 86400
+
+
+def clear_cache() -> None:
+    _CACHE.clear()
+
+
+def cached_get_json(session, url: str, params: dict, timeout: int = 30):
+    """GET mit In-Memory-Cache (TTL 24h).
+
+    Identische Abfragen (gleiche URL+Parameter) werden innerhalb einer warmen
+    Function-Instanz aus dem Cache bedient, statt die ZAW-API erneut zu treffen.
+    """
+    key = url + "?" + urlencode(sorted((k, str(v)) for k, v in params.items()))
+    ttl = _cache_ttl()
+    now = time.monotonic()
+    if ttl > 0:
+        hit = _CACHE.get(key)
+        if hit and hit[0] > now:
+            return hit[1]
+    getter = session if session is not None else requests
+    data = getter.get(url, params=params, timeout=timeout).json()
+    if ttl > 0:
+        _CACHE[key] = (now + ttl, data)
+    return data
 
 # --------------------------------------------------------------------------- #
 # Defaults für optionale Parameter
@@ -120,7 +160,7 @@ def resolve_address(
     city_lower = city.lower().strip()
     house = house_number.lower().strip().lstrip("0") or None
 
-    cities = session.get(api, params={"r": "cities_web"}, timeout=30).json()
+    cities = cached_get_json(session, api, {"r": "cities_web"})
     city_id = area_id = None
     has_streets = True
     for c in cities:
@@ -132,7 +172,7 @@ def resolve_address(
         raise ValueError(f"Gemeinde '{city}' nicht gefunden. Verfügbar: {available}")
 
     if has_streets:
-        streets = session.get(api, params={"r": "streets", "city_id": city_id}, timeout=30).json()
+        streets = cached_get_json(session, api, {"r": "streets", "city_id": city_id})
         match = None
         for st in streets:
             if _norm_street(st["name"]) == _norm_street(street) or \
@@ -155,7 +195,7 @@ def resolve_address(
 
 def fetch_trash_names(session: requests.Session, service_id: str, city_id, area_id) -> dict[str, str]:
     api = api_base(service_id)
-    data = session.get(api, params={"r": "trash", "city_id": city_id, "area_id": area_id}, timeout=30).json()
+    data = cached_get_json(session, api, {"r": "trash", "city_id": city_id, "area_id": area_id})
     m: dict[str, str] = {}
     for b in data:
         m[b["name"]] = b["title"]
@@ -165,8 +205,8 @@ def fetch_trash_names(session: requests.Session, service_id: str, city_id, area_
 
 def fetch_dates(session: requests.Session, service_id: str, city_id, area_id, names) -> list[tuple[dt.date, str]]:
     api = api_base(service_id)
-    data = session.get(api, params={"r": "dates/0", "city_id": city_id, "area_id": area_id, "ws": 3},
-                       timeout=30).json()
+    data = cached_get_json(session, api,
+                           {"r": "dates/0", "city_id": city_id, "area_id": area_id, "ws": 3})
     out = [(dt.datetime.strptime(e["day"], "%Y-%m-%d").date(),
             names.get(e["trash_name"], e["trash_name"])) for e in data]
     out.sort()
@@ -176,7 +216,7 @@ def fetch_dates(session: requests.Session, service_id: str, city_id, area_id, na
 def fetch_trash_types(session: requests.Session, service_id: str, city_id, area_id) -> list[dict]:
     """Gibt die verfügbaren Abfalltypen als Liste von {name, title} zurück."""
     api = api_base(service_id)
-    data = session.get(api, params={"r": "trash", "city_id": city_id, "area_id": area_id}, timeout=30).json()
+    data = cached_get_json(session, api, {"r": "trash", "city_id": city_id, "area_id": area_id})
     return [{"name": b["name"], "title": b["title"]} for b in data]
 
 

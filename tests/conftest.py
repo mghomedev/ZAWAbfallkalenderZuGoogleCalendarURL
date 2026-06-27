@@ -39,20 +39,28 @@ def mock_zaw_server():
     """Startet den Mock-ZAW und verdrahtet ZAW_API_BASE."""
     server, base_url, counter = mock_zaw.start_mock()
     os.environ["ZAW_API_BASE"] = base_url
+    # Rate-Limit im Normalbetrieb der Suite praktisch deaktivieren; einzelne
+    # Tests setzen es gezielt herab (via monkeypatch).
+    os.environ["ZAW_RATE_PER_MIN"] = "1000000"
     yield {"base_url": base_url, "counter": counter}
     server.shutdown()
     os.environ.pop("ZAW_API_BASE", None)
+    os.environ.pop("ZAW_RATE_PER_MIN", None)
 
 
 @pytest.fixture(scope="session")
-def app_server(mock_zaw_server):
+def app_module(mock_zaw_server):
+    """Die geladene echte Function (für Cache-/Rate-Hooks in Tests)."""
+    return _load_app_handler()
+
+
+@pytest.fixture(scope="session")
+def app_server(app_module):
     """Startet die echte Vercel-Function als lokalen HTTP-Server.
 
     Gibt die Basis-URL (z.B. http://127.0.0.1:PORT) zurück.
     """
-    app = _load_app_handler()
-
-    class QuietHandler(app.handler):
+    class QuietHandler(app_module.handler):
         def log_message(self, *args):  # keine Konsolen-Logs
             pass
 

@@ -27,12 +27,13 @@ Pro Abholung entstehen bis zu **zwei** Kalender-Eintraege:
 - **morgens am Abholtag** -- ganztaegiger, sichtbarer Eintrag
 - **Vorabend** (Standard 22:00) -- Termin mit VALARM ("Tonne rausstellen")
 
-### Immer aktuell
+### Immer aktuell -- und schonend zur ZAW
 
-Die Termine werden **bei jedem Abruf live** von der ZAW-API geholt -- es gibt
-keinen Cache und keinen Cron-Job. Wenn die ZAW Termine verschiebt (z.B. wegen
-Feiertagen), sind die Aenderungen beim naechsten Poll durch Google Kalender
-(alle ~8-24 h) automatisch sichtbar. Es ist kein manuelles Update noetig.
+Die Termine kommen direkt aus der ZAW-API; **kein Cron, keine manuelle Pflege**.
+Damit die ZAW-Server **nicht ueberlastet** werden, sind Antworten **bis zu 24 h
+gecacht** (Edge-Cache + In-Function-Cache, siehe unten). Verschiebungen (z.B. wegen
+Feiertagen) erscheinen daher spaetestens nach ~24 h plus Googles Poll-Intervall
+(~8-24 h) automatisch -- fuer Mülltermine voellig ausreichend.
 
 > **Hinweis:** Google ignoriert VALARM in abonnierten Kalendern. Die Vorabend-Eintraege
 > sind sichtbar, piepen aber nicht. Apple Kalender und Thunderbird ehren VALARM.
@@ -104,7 +105,40 @@ python3 zaw_ics_gen.py --stdout       # ICS zur Sichtpruefung
   erzeugt eine RFC-5545-konforme ICS-Datei.
 - `api/index.py` -- Vercel Serverless Function: Landing Page, Feed-Endpunkt,
   Gemeinde/Strassen/Abfalltyp-APIs fuer den Picker.
-- Bei jedem Abruf werden live die aktuellen Termine geholt (kein Cron).
+- Termine werden bei Bedarf aus der ZAW-API geholt (kein Cron) -- aber gecacht
+  (siehe naechster Abschnitt), damit die ZAW-Server nicht ueberlastet werden.
+
+---
+
+## Schonung der ZAW-Server (Anforderung: ZAW nicht ueberlasten)
+
+Das Projekt nutzt die ZAW-API als unkooperierter Dritter. Damit Crawler, Bots
+oder massenhaftes Durchprobieren von Adressen **weder diese App noch die
+ZAW-Server ueberlasten**, sind mehrere Schutzschichten aktiv:
+
+1. **24h Edge-Cache (Vercel CDN):** `/feed` und alle `/api/*` antworten mit
+   `Cache-Control: s-maxage=86400`. Wiederholte Abrufe **derselben URL**
+   (z.B. Googles Kalender-Poller) werden vom CDN bedient und treffen weder die
+   Function noch ZAW.
+2. **24h In-Function-Cache:** Jede ZAW-Antwort (Gemeinden, Strassen, Tonnen,
+   Termine) wird in der warmen Function-Instanz bis zu 24 h zwischengespeichert
+   (`ZAW_CACHE_TTL`, Default `86400`). Identische Abfragen gehen nicht erneut zu ZAW.
+3. **Best-effort Rate-Limit pro IP:** Standard 120 Anfragen/Minute/IP
+   (`ZAW_RATE_PER_MIN`), danach `429 Too Many Requests`. Greift besonders gegen
+   Cache-umgehende Adress-Enumeration. (Serverless-bedingt nur pro Instanz.)
+4. **robots.txt:** verbietet wohlerzogenen Crawlern `/api/` und `/feed`.
+
+**Empfehlung fuer Produktion:** zusaetzlich die **Vercel Firewall / WAF**
+(Dashboard -> Firewall) als plattformweites Rate-Limit aktivieren -- das ist die
+einzige instanzuebergreifende, wirklich harte Schranke.
+
+Konfiguration per Umgebungsvariable:
+
+| Variable | Default | Wirkung |
+|---|---|---|
+| `ZAW_CACHE_TTL` | `86400` | Cache-Dauer in Sekunden (`0` = aus) |
+| `ZAW_RATE_PER_MIN` | `120` | Anfragen/Minute/IP (`0` = aus) |
+| `ZAW_API_BASE` | (ZAW) | API-Basis ueberschreiben (Tests/Mock) |
 
 ---
 

@@ -39,6 +39,19 @@ ihres APIs auf diese Weise nicht mehr möchte.
 **Google ignoriert VALARM in abonnierten Kalendern.** Die 22-Uhr-Einträge sind
 sichtbar, piepen aber nicht. VALARM bleibt im Feed (Apple/Thunderbird ehren sie).
 
+## Schonung der ZAW-Server (Pflicht-Anforderung: ZAW nicht überlasten)
+Mehrschichtiger Schutz gegen Überlastung von App **und** ZAW-Backend:
+- **24h Edge-Cache:** `/feed` + `/api/*` senden `s-maxage=86400` → Vercel-CDN
+  bedient wiederholte gleiche URLs (z.B. Google-Poller) ohne Function/ZAW.
+- **24h In-Function-Cache** (`cached_get_json` in `zaw_ics_gen.py`): jede
+  ZAW-Antwort wird pro warmer Instanz bis 24h gecacht. `ZAW_CACHE_TTL` (0=aus).
+- **Rate-Limit pro IP** (`_rate_ok` in `api/index.py`): `ZAW_RATE_PER_MIN`
+  (Default 120), sonst 429. Best-effort (serverless: nur pro Instanz).
+- **robots.txt** verbietet Crawlern `/api/` und `/feed`.
+- Produktion zusätzlich: **Vercel Firewall/WAF** im Dashboard (harte Schranke).
+Env-Knöpfe: `ZAW_CACHE_TTL`, `ZAW_RATE_PER_MIN`, `ZAW_API_BASE` (Tests/Mock).
+Cache/Rate sind durch `tests/test_protection.py` abgedeckt (Mock zählt Upstream).
+
 ## Tests (vor dem Deploy)
 Offline-Selbsttest mit Mock-ZAW + echter Function + headless Chromium:
 ```bash
