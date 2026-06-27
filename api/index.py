@@ -498,10 +498,9 @@ async function loadTrash(cityId, areaId) {
       const cb = document.createElement("input");
       cb.type = "checkbox";
       cb.value = t.name;
-      // Pre-fill: if types param given, only check matching ones
+      // Pre-fill: if types param given, only check matching ones (exact API name match)
       if (typeFilter) {
-        const n = t.name.toLowerCase();
-        cb.checked = typeFilter.some(f => n.includes(f));
+        cb.checked = typeFilter.includes(t.name);
       } else {
         cb.checked = true;
       }
@@ -531,20 +530,11 @@ function updateUrl() {
   if (currentStreet) p.set("street", currentStreet);
   p.set("nr", currentNr || "1");
 
-  // Abfalltyp-Filter: immer alle gechecken Typen in die URL schreiben
+  // Abfalltyp-Filter: exakte API-Namen verwenden (z.B. ZAW_BIO, ZAW_REST_2W)
   const allCbs = [...trashChecks.querySelectorAll("input[type=checkbox]")];
   const checked = allCbs.filter(cb => cb.checked);
   if (checked.length > 0) {
-    const keys = checked.map(cb => {
-      const n = cb.value.toLowerCase();
-      if (n.includes("bio")) return "bio";
-      if (n.includes("pap")) return "pap";
-      if (n.includes("gelb")) return "gelb";
-      if (n.includes("rest")) return "rest";
-      if (n.includes("schad")) return "schad";
-      return cb.value;
-    });
-    p.set("types", keys.join(","));
+    p.set("types", checked.map(cb => cb.value).join(","));
   }
 
   p.set("eve", eveEl.value);

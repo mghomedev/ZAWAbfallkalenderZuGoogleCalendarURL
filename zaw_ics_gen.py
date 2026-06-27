@@ -194,7 +194,12 @@ def get_schedule(
     dates = fetch_dates(s, service_id, city_id, area_id, names)
     if trash_filter:
         keys = [k.lower() for k in trash_filter]
-        dates = [(d, t) for d, t in dates if any(k in t.lower() for k in keys)]
+        # Build set of allowed titles by matching filter keys against API names AND titles
+        allowed = set()
+        for api_name, title in names.items():
+            if any(k == api_name.lower() or k in api_name.lower() or k in title.lower() for k in keys):
+                allowed.add(title)
+        dates = [(d, t) for d, t in dates if t in allowed]
     return dates, city_id, area_id
 
 
