@@ -538,9 +538,9 @@ function updateUrl() {
     const keys = checked.map(cb => {
       const n = cb.value.toLowerCase();
       if (n.includes("bio")) return "bio";
-      if (n.includes("pap")) return "papier";
+      if (n.includes("pap")) return "pap";
       if (n.includes("gelb")) return "gelb";
-      if (n.includes("rest")) return "restm";
+      if (n.includes("rest")) return "rest";
       if (n.includes("schad")) return "schad";
       return cb.value;
     });
