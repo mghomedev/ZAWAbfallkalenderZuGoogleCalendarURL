@@ -20,3 +20,7 @@ Thumbs.db
 
 # Originales ZIP-Archiv
 zaw-abfall-sync.zip
+
+# Vercel
+.vercel
+.env.local

@@ -1,0 +1,10 @@
+[project]
+name = "zaw-abfallkalender-zu-google-calendar-url"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "requests>=2.31",
+]
+
+[tool.vercel]
+entrypoint = "api.feed:handler"
