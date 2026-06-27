@@ -1,0 +1,22 @@
+# Persönliche Konfiguration (Adressen, Zugangsdaten)
+.env
+
+# Generierte ICS-Dateien
+*.ics
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Originales ZIP-Archiv
+zaw-abfall-sync.zip
