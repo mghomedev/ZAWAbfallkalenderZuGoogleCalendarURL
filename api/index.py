@@ -239,6 +239,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
   <div id="hn-group" style="display:none">
     <label for="hn">Hausnummer</label>
     <select id="hn"><option value="">Bitte w&auml;hlen</option></select>
+    <input id="hn-input" type="text" placeholder="Hausnummer eingeben" style="display:none">
   </div>
 
   <div id="trash-group" style="display:none" class="section">
@@ -322,6 +323,7 @@ let streetsData = [], selectedCity = null, trashTypes = [];
 const cityEl = document.getElementById("city");
 const streetEl = document.getElementById("street");
 const hnEl = document.getElementById("hn");
+const hnInput = document.getElementById("hn-input");
 const hnGroup = document.getElementById("hn-group");
 const trashGroup = document.getElementById("trash-group");
 const trashChecks = document.getElementById("trash-checks");
@@ -410,10 +412,16 @@ streetEl.addEventListener("change", async () => {
       o.textContent = hn[0];
       hnEl.appendChild(o);
     });
+    hnEl.style.display = "";
+    hnInput.style.display = "none";
     hnGroup.style.display = "block";
+    hnGroup.dataset.mode = "select";
   } else {
-    await loadTrash(selectedCity.id, street.area_id);
-    buildUrl(cityName, street.name, "1");
+    hnInput.value = "";
+    hnInput.style.display = "";
+    hnEl.style.display = "none";
+    hnGroup.style.display = "block";
+    hnGroup.dataset.mode = "input";
   }
 });
 
@@ -421,12 +429,21 @@ hnEl.addEventListener("change", async () => {
   if (!hnEl.value) { resultEl.classList.remove("visible"); return; }
   const cityName = cityEl.options[cityEl.selectedIndex].textContent;
   const street = streetsData[parseInt(streetEl.value)];
-  // Finde area_id der gewählten Hausnummer
   let areaId = street.area_id;
   const hn = street.house_numbers.find(h => h[0] === hnEl.value);
   if (hn) areaId = hn[1];
   await loadTrash(selectedCity.id, areaId);
   buildUrl(cityName, street.name, hnEl.value);
+});
+
+hnInput.addEventListener("input", async () => {
+  const val = hnInput.value.trim();
+  if (!val) { resultEl.classList.remove("visible"); return; }
+  const cityName = cityEl.options[cityEl.selectedIndex].textContent;
+  const idx = parseInt(streetEl.value);
+  const street = streetsData[idx];
+  await loadTrash(selectedCity.id, street.area_id);
+  buildUrl(cityName, street.name, val);
 });
 
 async function loadTrash(cityId, areaId) {
