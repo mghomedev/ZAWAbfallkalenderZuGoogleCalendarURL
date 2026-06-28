@@ -272,3 +272,58 @@ def test_filter_legacy_substring_keys_still_work():
     # alte Lesezeichen-Schlüssel (bio) sollen weiterhin matchen
     out = z.filter_dates_by_trash(ALL_DATES, NAMES, ["bio"])
     assert {t for _, t in out} == {"Bioabfall"}
+
+
+# --------------------------------------------------------------------------- #
+# Farb-Normalisierung (_norm_color)
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("raw,expected", [
+    ("008d34", "#008d34"),          # ZAW Bio
+    ("#fecb00", "#fecb00"),         # mit führendem #
+    ("ABC", "#aabbcc"),             # 3-stellig -> expandiert + lowercase
+    ("FECB00", "#fecb00"),          # Großbuchstaben -> lowercase
+    ("99999", "#9e9e9e"),           # ZAW-Bug (5-stellig) -> Grau-Fallback
+    ("", "#9e9e9e"),                # leer -> Fallback
+    (None, "#9e9e9e"),              # None -> Fallback
+    ("nothex", "#9e9e9e"),          # Müll -> Fallback
+])
+def test_norm_color(raw, expected):
+    assert z._norm_color(raw) == expected
+
+
+# --------------------------------------------------------------------------- #
+# colors-Parameter -> X-ZAW-COLOR pro VEVENT
+# --------------------------------------------------------------------------- #
+def test_build_ics_embeds_color_per_event():
+    colors = {"Bioabfall": "#008d34", "Schadstoffmobil": "#e3000e"}
+    ics = z.build_ics(_dates(((2026, 7, 15), "Bioabfall"),
+                             ((2026, 7, 16), "Schadstoffmobil")),
+                      now=dt.datetime(2026, 7, 1, tzinfo=UTC),
+                      evening_enabled=False, colors=colors)
+    assert "X-ZAW-COLOR:#008d34" in ics
+    assert "X-ZAW-COLOR:#e3000e" in ics
+
+
+def test_build_ics_color_on_both_morning_and_evening():
+    colors = {"Bioabfall": "#008d34"}
+    ics = z.build_ics(_dates(((2026, 7, 15), "Bioabfall")),
+                      now=dt.datetime(2026, 7, 1, tzinfo=UTC), colors=colors)
+    # je ein X-ZAW-COLOR im Morgen- und im Vorabend-VEVENT
+    assert ics.count("X-ZAW-COLOR:#008d34") == 2
+
+
+def test_build_ics_without_colors_has_no_color_lines():
+    ics = z.build_ics(_dates(((2026, 7, 15), "Bioabfall")),
+                      now=dt.datetime(2026, 7, 1, tzinfo=UTC))
+    assert "X-ZAW-COLOR" not in ics
+
+
+def test_build_ics_two_rest_types_get_distinct_colors():
+    colors = {"Restmüll Tonnen und Container 14-täglich": "#2f3639",
+              "Restmüll Container wöchentlich": "#9e9e9e"}
+    ics = z.build_ics(_dates(((2026, 7, 15), "Restmüll Tonnen und Container 14-täglich"),
+                             ((2026, 7, 16), "Restmüll Container wöchentlich")),
+                      now=dt.datetime(2026, 7, 1, tzinfo=UTC),
+                      evening_enabled=False, colors=colors)
+    assert "X-ZAW-COLOR:#2f3639" in ics
+    assert "X-ZAW-COLOR:#9e9e9e" in ics

@@ -60,14 +60,19 @@ STREETS = {
 }
 
 # Abfalltypen (kanonisch, für jede Adresse identisch)
+# Farben exakt wie die echte ZAW/jumomind-API (Hex ohne #). ZAW_REST_W liefert
+# real den fehlerhaften 5-stelligen Wert "99999" -> testet die _norm_color-
+# Fallback-Logik (ungültig -> neutrales Grau).
 TRASH_TYPES = [
-    {"name": "ZAW_BIO", "_name": "ZAW_BIO", "title": "Bioabfall"},
-    {"name": "ZAW_GELB", "_name": "ZAW_GELB", "title": "Gelber Sack"},
-    {"name": "ZAW_PAP", "_name": "ZAW_PAP", "title": "Papier Tonnen und Container"},
+    {"name": "ZAW_BIO", "_name": "ZAW_BIO", "title": "Bioabfall", "color": "008d34"},
+    {"name": "ZAW_GELB", "_name": "ZAW_GELB", "title": "Gelber Sack", "color": "fecb00"},
+    {"name": "ZAW_PAP", "_name": "ZAW_PAP",
+     "title": "Papier Tonnen und Container", "color": "0061a6"},
     {"name": "ZAW_REST_2W", "_name": "ZAW_REST_2W",
-     "title": "Restmüll Tonnen und Container 14-täglich"},
-    {"name": "ZAW_REST_W", "_name": "ZAW_REST_W", "title": "Restmüll Container wöchentlich"},
-    {"name": "ZAW_SCHAD", "_name": "ZAW_SCHAD", "title": "Schadstoffmobil"},
+     "title": "Restmüll Tonnen und Container 14-täglich", "color": "2f3639"},
+    {"name": "ZAW_REST_W", "_name": "ZAW_REST_W",
+     "title": "Restmüll Container wöchentlich", "color": "99999"},
+    {"name": "ZAW_SCHAD", "_name": "ZAW_SCHAD", "title": "Schadstoffmobil", "color": "e3000e"},
 ]
 TRASH_NAMES = [t["name"] for t in TRASH_TYPES]
 

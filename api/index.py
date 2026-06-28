@@ -29,7 +29,7 @@ import requests
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from zaw_ics_gen import (  # noqa: E402
     get_schedule, build_ics, resolve_address, fetch_trash_types,
-    cached_get_json, clear_cache,
+    fetch_trash_colors, cached_get_json, clear_cache,
 )
 
 
@@ -162,8 +162,12 @@ class handler(BaseHTTPRequestHandler):
             kw["morning_time"] = morn_mode
 
         try:
-            dates, _, _ = get_schedule("zaw", city, street or "", nr, trash_filter=trash_filter)
-            ics = build_ics(dates, cal_name=cal_name, **kw)
+            dates, city_id, area_id = get_schedule(
+                "zaw", city, street or "", nr, trash_filter=trash_filter)
+            # exakte ZAW-Tonnenfarben (gleicher 24h-Cache wie /api/trash, kein
+            # zusätzlicher Upstream-Request) ins ICS einbetten -> Web-Vorschau.
+            colors = fetch_trash_colors(None, "zaw", city_id, area_id)
+            ics = build_ics(dates, cal_name=cal_name, colors=colors, **kw)
         except ValueError as ex:
             self._text(404, str(ex))
             return
@@ -303,15 +307,17 @@ INDEX_HTML = r"""<!DOCTYPE html>
   .btn-preview:hover { background: var(--bg); }
   #preview-wrap { display: none; margin-top: 1rem; }
   #calendar { font-size: .85rem; }
+  .swatch { display: inline-block; width: .85rem; height: .85rem; border-radius: 3px;
+    margin: 0 .15rem 0 .35rem; vertical-align: middle; border: 1px solid rgba(0,0,0,.15); }
 </style>
-<!-- Vorschau: FullCalendar v6 + iCalendar-Plugin + ical.js (ES5, registriert globales ICAL).
-     Reihenfolge (defer erhält sie): Core -> ical.js -> Plugin.
+<!-- Vorschau: FullCalendar v6 (Core-Bundle) + ical.js (ES5, registriert globales ICAL).
+     Wir parsen das ICS selbst mit ical.js, um die exakte ZAW-Tonnenfarbe pro Termin
+     (X-ZAW-COLOR) zu lesen und einzufärben – darum kein separates iCalendar-Plugin.
      WICHTIG: ical.js als .cjs MUSS von unpkg kommen (Content-Type text/javascript);
      jsdelivr liefert .cjs als application/node -> Chromium blockt die Ausführung
-     (nosniff), dann bleibt das globale ICAL undefiniert und das Plugin stumm. -->
+     (nosniff), dann bliebe das globale ICAL undefiniert. -->
 <script defer src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.21/index.global.min.js"></script>
 <script defer src="https://unpkg.com/ical.js@2.1.0/dist/ical.es5.min.cjs"></script>
-<script defer src="https://cdn.jsdelivr.net/npm/@fullcalendar/icalendar@6.1.21/index.global.min.js"></script>
 </head>
 <body>
 
@@ -613,6 +619,11 @@ async function loadTrash(cityId, areaId) {
       }
       cb.addEventListener("change", updateUrl);
       lbl.appendChild(cb);
+      // Farb-Swatch in der exakten ZAW-Tonnenfarbe (kommt aus /api/trash).
+      const sw = document.createElement("span");
+      sw.className = "swatch";
+      if (t.color) { sw.style.background = t.color; sw.dataset.color = t.color; }
+      lbl.appendChild(sw);
       lbl.appendChild(document.createTextNode(" " + t.title));
       trashChecks.appendChild(lbl);
     });
@@ -673,12 +684,54 @@ async function gcalClick() {
   // der Link öffnet danach die Google-Seite (kein preventDefault).
 }
 
-// --- Vorschau via FullCalendar + iCalendar-Plugin ------------------------- //
+// --- Vorschau: ICS selbst mit ical.js parsen + ZAW-Farben einfärben ------- //
 let _calendar = null;
+
+// Fallback-Farben nach Schlüsselwort, falls ein Feed kein X-ZAW-COLOR trägt.
+// 14-täglich/wöchentlich zuerst, damit die beiden Restmüll-Typen sich trennen.
+const FALLBACK_COLORS = [
+  ["14-tägl", "#2f3639"], ["wöchent", "#9e9e9e"],
+  ["bio", "#008d34"], ["gelb", "#fecb00"], ["papier", "#0061a6"],
+  ["restm", "#2f3639"], ["schadstoff", "#e3000e"],
+];
+function _fallbackColor(text) {
+  const s = (text || "").toLowerCase();
+  for (let i = 0; i < FALLBACK_COLORS.length; i++) {
+    if (s.indexOf(FALLBACK_COLORS[i][0]) !== -1) return FALLBACK_COLORS[i][1];
+  }
+  return "#9e9e9e";
+}
 function _previewReady() {
   return typeof FullCalendar !== "undefined" && typeof FullCalendar.Calendar !== "undefined"
-    && typeof ICAL !== "undefined";  // ICAL ist Peer-Dependency des iCalendar-Plugins
+    && typeof ICAL !== "undefined";
 }
+
+// ICS-Text -> FullCalendar-Events. Farbe: bevorzugt X-ZAW-COLOR (exakte ZAW-
+// Tonnenfarbe, vom Feed eingebettet), sonst Schlüsselwort-Fallback.
+function _icsToEvents(icsText) {
+  const comp = new ICAL.Component(ICAL.parse(icsText));
+  const out = [];
+  const ves = comp.getAllSubcomponents("vevent");
+  for (let i = 0; i < ves.length; i++) {
+    const ve = ves[i];
+    const ev = new ICAL.Event(ve);
+    const dtstart = ve.getFirstProperty("dtstart");
+    const isAllDay = !!(dtstart && dtstart.getFirstValue().isDate);
+    const summary = ev.summary || "(ohne Titel)";
+    const desc = (ve.getFirstPropertyValue("description") || "") + "";
+    const color = ve.getFirstPropertyValue("x-zaw-color") || _fallbackColor(summary + " " + desc);
+    out.push({
+      title: summary,
+      start: ev.startDate ? ev.startDate.toJSDate() : null,
+      end: ev.endDate ? ev.endDate.toJSDate() : null,
+      allDay: isAllDay,
+      backgroundColor: color,
+      borderColor: color,
+    });
+  }
+  return out;
+}
+
 function previewClick() {
   const wrap = document.getElementById("preview-wrap");
   const el = document.getElementById("calendar");
@@ -697,18 +750,25 @@ function _renderPreviewWhenReady(tries) {
     setTimeout(() => _renderPreviewWhenReady(tries + 1), 100);
     return;
   }
-  if (_calendar) { _calendar.destroy(); _calendar = null; }
-  el.innerHTML = "";
-  _calendar = new FullCalendar.Calendar(el, {
-    initialView: "listMonth",
-    headerToolbar: { left: "prev,next today", center: "title", right: "dayGridMonth,listMonth" },
-    events: { url: urlBox.textContent, format: "ics" },
-    height: "auto",
-    firstDay: 1,
-    noEventsContent: "Keine Termine im Zeitraum",
+  fetch(urlBox.textContent).then(r => r.text()).then(ics => {
+    let events = [];
+    try { events = _icsToEvents(ics); } catch (e) { events = []; }
+    if (_calendar) { _calendar.destroy(); _calendar = null; }
+    el.innerHTML = "";
+    _calendar = new FullCalendar.Calendar(el, {
+      initialView: "listMonth",
+      headerToolbar: { left: "prev,next today", center: "title", right: "dayGridMonth,listMonth" },
+      events: events,
+      height: "auto",
+      firstDay: 1,
+      noEventsContent: "Keine Termine im Zeitraum",
+    });
+    _calendar.render();
+    document.getElementById("preview-wrap").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }).catch(() => {
+    el.innerHTML = '<p style="color:var(--muted);font-size:.85rem">' +
+      'Vorschau konnte den Feed nicht laden.</p>';
   });
-  _calendar.render();
-  document.getElementById("preview-wrap").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 async function copyUrl() {

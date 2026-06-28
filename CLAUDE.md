@@ -16,9 +16,13 @@ ihres APIs auf diese Weise nicht mehr möchte.
 - Endpunkte:
   - `?r=cities_web` → Gemeinden `{name,_name,id,area_id,has_streets}`
   - `?r=streets&city_id=ID` → Straßen `{name,_name,area_id,houseNumbers:[[nr,area_id]]}`
-  - `?r=trash&city_id=ID&area_id=ID` → Tonnenarten `{name,_name,title}`
+  - `?r=trash&city_id=ID&area_id=ID` → Tonnenarten `{name,_name,title,color}`
   - `?r=dates/0&city_id=ID&area_id=ID&ws=3` → Termine `{trash_name, day:"YYYY-MM-DD"}`
 - Straßen-Normalisierung: lowercase/casefold, `straße`→`strasse`, `str.`→`strasse`.
+- **Tonnenfarben** (exakt, aus `trash.color`, Hex ohne `#`):
+  Bio `008d34`, Gelber Sack `fecb00`, Papier `0061a6`, Restmüll 14-täglich
+  `2f3639`, Restmüll wöchentlich `99999` (ZAW-Bug, 5-stellig → Fallback Grau
+  `9e9e9e`), Schadstoffmobil `e3000e`. `_norm_color()` validiert/normalisiert.
 
 ## Architektur
 - `zaw_ics_gen.py` — Kernlogik: jumomind-API abfragen, ICS erzeugen.
@@ -34,6 +38,18 @@ ihres APIs auf diese Weise nicht mehr möchte.
   `morn` (`allday`|HH:MM|`off`). Liest `ZAW_API_BASE` per Request (`_api()`).
 - `pyproject.toml` — `[tool.vercel] entrypoint = "api.index:handler"` + Deps.
 - `vercel.json` — Rewrite `/feed` → `/api/feed`.
+
+## Farben & eingebettete Vorschau
+- Jedes VEVENT trägt `X-ZAW-COLOR:#rrggbb` (exakte ZAW-Tonnenfarbe). Google/Apple
+  ignorieren das unbekannte Property folgenlos; nur die Vorschau nutzt es.
+  Quelle: `fetch_trash_colors()` (gleicher 24h-`trash`-Cache, kein Extra-Upstream).
+- `/api/trash` liefert `color` mit → farbiger Swatch pro Abfalltyp-Checkbox.
+- **Vorschau** (Landing Page): FullCalendar v6 (Core-Bundle) + **ical.js ES5**.
+  Wir parsen das ICS **selbst** mit ical.js und lesen `X-ZAW-COLOR` (darum KEIN
+  `@fullcalendar/icalendar`-Plugin – es würde X-Props nicht durchreichen, und nur
+  so lassen sich die zwei Restmüll-Typen unterschiedlich einfärben).
+  **ical.js `.cjs` MUSS von unpkg** kommen (jsdelivr liefert `application/node`
+  → Chromium blockt unter nosniff → globales `ICAL` bliebe undefiniert).
 
 ## WICHTIGE Stolperfalle
 **Google ignoriert VALARM in abonnierten Kalendern.** Die 22-Uhr-Einträge sind
@@ -58,9 +74,13 @@ Offline-Selbsttest mit Mock-ZAW + echter Function + headless Chromium:
 pip install -r requirements-dev.txt && python -m playwright install chromium
 python -m pytest
 ```
-`tests/mock_zaw.py` (deterministischer ZAW-Mock, zählt Upstream-Requests),
+`tests/mock_zaw.py` (deterministischer ZAW-Mock inkl. Farben, zählt Upstream),
 `tests/conftest.py` (startet Mock + echte Function lokal). Deckt u.a. den
-Prefill-Roundtrip und alle Picker-Kombinationen ab. **Vor jedem Deploy grün.**
+Prefill-Roundtrip, alle Picker-Kombinationen und die **farbige Vorschau** ab
+(`test_preview_colors_events_like_zaw` mockt per `page.route` ein selbst
+erzeugtes, bekanntes ICS und prüft die real gerenderten Termin-Farben – inkl.
+unterscheidbarer Restmüll-Typen; Checkbox-Swatches via
+`test_trash_checkboxes_show_api_colors`). **Vor jedem Deploy grün.**
 
 Hinweis: Code ist 3.10+-kompatibel (keine Backslashes in f-string-Ausdrücken);
 Vercel nutzt 3.12. Auf Windows braucht `zoneinfo` das `tzdata`-Paket.

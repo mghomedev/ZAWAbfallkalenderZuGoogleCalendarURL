@@ -19,8 +19,11 @@ die Adresse wird einfach als URL-Parameter uebergeben.
 
 1. Oeffne den **[Picker](https://zaw-abfallkalender-zu-google-calend.vercel.app/)**
 2. Waehle Gemeinde, Strasse, Hausnummer
-3. Optional: Abfalltypen filtern, Erinnerungszeiten anpassen
-4. Klicke **"+ Google Kalender"** oder kopiere die URL
+3. Optional: Abfalltypen filtern (mit **ZAW-Farb-Swatch**), Erinnerungszeiten anpassen
+4. Optional: **Vorschau** anzeigen -- die Termine erscheinen direkt auf der Seite,
+   je Abfalltyp in der **exakten ZAW-Farbe** (Bio gruen, Papier blau, Gelber Sack
+   gelb, Restmuell schwarz/grau, Schadstoff rot)
+5. Klicke **"Zu Google Kalender hinzufuegen"** (URL wird kopiert) oder kopiere die URL
 
 Pro Abholung entstehen bis zu **zwei** Kalender-Eintraege:
 

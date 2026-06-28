@@ -247,10 +247,68 @@ def test_prefill_roundtrip(app_server, page, case):
 
 
 # --------------------------------------------------------------------------- #
-# Gemeinde ohne Straßen
+# Vorschau (FullCalendar + ical.js, selbst geparst) + ZAW-Farben
 # --------------------------------------------------------------------------- #
+# Exakte ZAW-Tonnenfarben (wie von der API geliefert / normalisiert).
+ZAW_HEX = {
+    "ZAW_BIO": "#008d34", "ZAW_GELB": "#fecb00", "ZAW_PAP": "#0061a6",
+    "ZAW_REST_2W": "#2f3639", "ZAW_REST_W": "#9e9e9e", "ZAW_SCHAD": "#e3000e",
+}
+
+
+def _hex_to_rgb(h: str) -> str:
+    h = h.lstrip("#")
+    return f"rgb({int(h[0:2], 16)}, {int(h[2:4], 16)}, {int(h[4:6], 16)})"
+
+
+def _known_color_ics() -> str:
+    """Selbst erzeugter ICS-Kalender: pro Abfalltyp ein ganztägiger Termin im
+    AKTUELLEN Monat mit eingebetteter X-ZAW-COLOR. Dient als deterministisches
+    'Mock'-ICS, um die farbige Anzeige in der Vorschau zu prüfen."""
+    import datetime as _dt
+    base = _dt.date.today().replace(day=10)  # sicher im aktuellen Monat
+    entries = [
+        ("Bioabfall", "008d34"),
+        ("Gelber Sack", "fecb00"),
+        ("Papier", "0061a6"),
+        ("Restmüll 14-täglich", "2f3639"),
+        ("Restmüll wöchentlich", "9e9e9e"),
+        ("Schadstoffmobil", "e3000e"),
+    ]
+    L = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//test//known-ics//DE"]
+    for i, (title, hexc) in enumerate(entries):
+        d = base + _dt.timedelta(days=i)
+        nxt = d + _dt.timedelta(days=1)
+        L += [
+            "BEGIN:VEVENT",
+            f"UID:known-{i}@test.local",
+            f"DTSTART;VALUE=DATE:{d.strftime('%Y%m%d')}",
+            f"DTEND;VALUE=DATE:{nxt.strftime('%Y%m%d')}",
+            f"SUMMARY:{title}",
+            f"X-ZAW-COLOR:#{hexc}",
+            "END:VEVENT",
+        ]
+    L.append("END:VCALENDAR")
+    return "\r\n".join(L) + "\r\n"
+
+
+def test_trash_checkboxes_show_api_colors(app_server, page):
+    """Jede Abfalltyp-Checkbox trägt einen Swatch in der exakten ZAW-Farbe."""
+    _open(page, app_server)
+    _pick_address_with_hn(page)
+    data = page.evaluate(
+        """() => [...document.querySelectorAll('#trash-checks label')].map(l => {
+            const cb = l.querySelector('input');
+            const sw = l.querySelector('.swatch');
+            return { name: cb.value, color: sw ? getComputedStyle(sw).backgroundColor : '' };
+        })""")
+    got = {d["name"]: d["color"] for d in data}
+    for name, hexc in ZAW_HEX.items():
+        assert got.get(name) == _hex_to_rgb(hexc), f"{name}: {got.get(name)} != {hexc}"
+
+
 def test_preview_renders_feed_events(app_server, page):
-    """Die FullCalendar-Vorschau lädt die Feed-URL und rendert Termine.
+    """Die Vorschau lädt die Feed-URL, parst sie selbst (ical.js) und rendert.
 
     Übersprungen, falls das CDN im Test-Netz nicht erreichbar ist.
     """
@@ -268,25 +326,70 @@ def test_preview_renders_feed_events(app_server, page):
 
     assert page.is_visible("#calendar .fc-toolbar")  # FullCalendar gerendert
 
-    # Verifiziert, dass unser Feed wirklich in Events geparst wird (eigene
-    # listYear-Instanz, unabhängig von der gerade sichtbaren Monatsansicht).
+    # Verifiziert, dass unsere echte Parserfunktion den Feed in Events umsetzt.
     feed = page.text_content("#url-box")
     count = page.evaluate(
         """async (url) => {
-            const el = document.createElement('div');
-            document.body.appendChild(el);
-            const cal = new FullCalendar.Calendar(el, {
-                initialView: 'listYear', events: { url, format: 'ics' } });
-            cal.render();
-            for (let i = 0; i < 60; i++) {
-                if (cal.getEvents().length > 0) break;
-                await new Promise(r => setTimeout(r, 100));
-            }
-            const n = cal.getEvents().length;
-            cal.destroy(); el.remove();
-            return n;
+            const ics = await (await fetch(url)).text();
+            return (typeof _icsToEvents === 'function') ? _icsToEvents(ics).length : -1;
         }""", feed)
     assert count > 0, "Vorschau lud keine Events aus dem Feed"
+
+
+def test_preview_colors_events_like_zaw(app_server, page):
+    """Vorschau-Termine werden je Abfalltyp in der exakten ZAW-Farbe angezeigt.
+
+    Wir mocken den Feed mit einem selbst erzeugten, bekannten ICS (ein Termin
+    pro Typ inkl. X-ZAW-COLOR) und prüfen die tatsächlich gerenderten Farben.
+    """
+    _open(page, app_server)
+    _pick_address_with_hn(page)
+
+    ics = _known_color_ics()
+    page.route("**/feed*", lambda route: route.fulfill(
+        status=200, content_type="text/calendar; charset=utf-8", body=ics))
+
+    page.click("#btn-preview")
+    try:
+        page.wait_for_function(
+            "typeof FullCalendar !== 'undefined' && typeof ICAL !== 'undefined' "
+            "&& document.querySelectorAll('#calendar .fc-list-event').length >= 6",
+            timeout=20000)
+    except PlaywrightTimeout:
+        pytest.skip("FullCalendar-CDN im Test-Netz nicht erreichbar")
+
+    rows = page.evaluate(
+        """() => [...document.querySelectorAll('#calendar .fc-list-event')].map(r => {
+            const t = r.querySelector('.fc-list-event-title');
+            const dot = r.querySelector('.fc-list-event-dot');
+            return { title: t ? t.textContent.trim() : '',
+                     color: dot ? getComputedStyle(dot).borderTopColor : '' };
+        })""")
+    titles = {r["title"]: r["color"] for r in rows}
+
+    expect_map = {
+        "Bioabfall": "#008d34",
+        "Gelber Sack": "#fecb00",
+        "Papier": "#0061a6",
+        "Restmüll 14-täglich": "#2f3639",
+        "Restmüll wöchentlich": "#9e9e9e",
+        "Schadstoffmobil": "#e3000e",
+    }
+    for title, hexc in expect_map.items():
+        color = next((c for t, c in titles.items() if title in t), None)
+        assert color is not None, f"Termin '{title}' fehlt in der Vorschau: {titles}"
+        assert color == _hex_to_rgb(hexc), \
+            f"{title}: angezeigt {color}, erwartet {_hex_to_rgb(hexc)} ({hexc})"
+
+    # Die beiden Restmüll-Typen MÜSSEN sich farblich unterscheiden (ZAW-Vorgabe).
+    rest_2w = next(c for t, c in titles.items() if "14-täglich" in t)
+    rest_w = next(c for t, c in titles.items() if "wöchentlich" in t)
+    assert rest_2w != rest_w, f"Restmüll-Typen gleich gefärbt: {rest_2w}"
+
+
+# --------------------------------------------------------------------------- #
+# Stale-Result / Gemeinde ohne Straßen
+# --------------------------------------------------------------------------- #
 
 
 def _result_visible(page):

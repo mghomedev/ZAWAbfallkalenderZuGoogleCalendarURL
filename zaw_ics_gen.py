@@ -213,11 +213,47 @@ def fetch_dates(session: requests.Session, service_id: str, city_id, area_id, na
     return out
 
 
+def _norm_color(raw) -> str:
+    """Normalisiert eine ZAW-Farbe (Hex ohne führendes #) auf '#rrggbb'.
+
+    ZAW liefert die offizielle Tonnenfarbe pro Abfalltyp (z.B. Bio '008d34'),
+    aber teils fehlerhafte Werte (z.B. 'Restmüll wöchentlich' = '99999', nur
+    5 Stellen). Ungültige Werte fallen auf ein neutrales Grau zurück – das
+    passt zufällig genau für die wöchentliche Restmülltonne.
+    """
+    s = str(raw or "").strip().lstrip("#")
+    hexd = "0123456789abcdefABCDEF"
+    if len(s) == 3 and all(c in hexd for c in s):
+        s = "".join(c * 2 for c in s)
+    if len(s) == 6 and all(c in hexd for c in s):
+        return "#" + s.lower()
+    return "#9e9e9e"
+
+
 def fetch_trash_types(session: requests.Session, service_id: str, city_id, area_id) -> list[dict]:
-    """Gibt die verfügbaren Abfalltypen als Liste von {name, title} zurück."""
+    """Gibt die Abfalltypen als Liste von {name, title, color} zurück.
+
+    `color` ist die exakte ZAW-Farbe als '#rrggbb' (siehe _norm_color)."""
     api = api_base(service_id)
     data = cached_get_json(session, api, {"r": "trash", "city_id": city_id, "area_id": area_id})
-    return [{"name": b["name"], "title": b["title"]} for b in data]
+    return [{"name": b["name"], "title": b["title"],
+             "color": _norm_color(b.get("color"))} for b in data]
+
+
+def fetch_trash_colors(session: requests.Session, service_id: str, city_id, area_id) -> dict[str, str]:
+    """Gibt {Bezeichner -> '#rrggbb'} zurück, gekeyt nach title UND API-Name.
+
+    Nutzt denselben (24h gecachten) `trash`-Endpunkt wie die Tonnenarten, löst
+    also keinen zusätzlichen Upstream-Request aus."""
+    api = api_base(service_id)
+    data = cached_get_json(session, api, {"r": "trash", "city_id": city_id, "area_id": area_id})
+    m: dict[str, str] = {}
+    for b in data:
+        c = _norm_color(b.get("color"))
+        m[b["title"]] = c
+        m.setdefault(b["name"], c)
+        m.setdefault(b["_name"], c)
+    return m
 
 
 def filter_dates_by_trash(
@@ -324,9 +360,17 @@ def build_ics(
     alarm_min_before: int = DEFAULTS["alarm_min_before"],
     days_back: int = DEFAULTS["days_back"],
     days_ahead: int = DEFAULTS["days_ahead"],
+    colors: dict[str, str] | None = None,
     now: dt.datetime | None = None,
 ) -> str:
-    """Erzeugt den ICS-String aus einer Terminliste."""
+    """Erzeugt den ICS-String aus einer Terminliste.
+
+    `colors` (optional): {Abfalltitel -> '#rrggbb'}. Ist eine Farbe vorhanden,
+    bekommt jedes VEVENT ein `X-ZAW-COLOR` mit der exakten ZAW-Tonnenfarbe –
+    die Web-Vorschau färbt die Termine damit. Google/Apple ignorieren das
+    unbekannte Property folgenlos.
+    """
+    colors = colors or {}
     now = now or dt.datetime.now(UTC)
     stamp = now.strftime("%Y%m%dT%H%M%SZ")
     today = now.astimezone(TZ).date()
@@ -353,6 +397,7 @@ def build_ics(
         if not (lo <= day <= hi):
             continue
         label = pretty_label(title)
+        col = colors.get(title)
 
         # --- 1) Eintrag am Abholtag (morgens / ganztägig) ---
         if morning_enabled:
@@ -370,6 +415,8 @@ def build_ics(
                 L.append(f"DTEND:{end}")
             L.append(f"SUMMARY:{_esc(label + ' – Abholung')}")
             L.append(f"DESCRIPTION:{_esc(title + ' · Quelle: ZAW (zaw-online.de)')}")
+            if col:
+                L.append(f"X-ZAW-COLOR:{col}")
             L.append("END:VEVENT")
 
         # --- 2) Erinnerung am Vorabend (mit VALARM) ---
@@ -389,6 +436,8 @@ def build_ics(
             desc = (f"Morgen ({morgen}) wird abgeholt: {title}. "
                     "ZAW sammelt z.T. ab 05:00 Uhr \u2013 heute Abend bereitstellen.")
             L.append(f"DESCRIPTION:{_esc(desc)}")
+            if col:
+                L.append(f"X-ZAW-COLOR:{col}")
             L.append("BEGIN:VALARM")
             L.append("ACTION:DISPLAY")
             L.append("DESCRIPTION:Tonne rausstellen")

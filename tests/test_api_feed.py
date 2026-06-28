@@ -44,6 +44,35 @@ def test_trash_endpoint(app_server):
                      "ZAW_REST_2W", "ZAW_REST_W", "ZAW_SCHAD"]
 
 
+def test_trash_endpoint_has_api_colors(app_server):
+    """Tonnenarten tragen die exakte ZAW-Farbe als '#rrggbb' (für Checkbox-Swatch
+    und Vorschau). Der fehlerhafte ZAW-Wert '99999' wird zu neutralem Grau."""
+    data = requests.get(app_server + "/api/trash",
+                        params={"city_id": "100", "area_id": "201"}, timeout=10).json()
+    colors = {t["name"]: t["color"] for t in data}
+    assert colors["ZAW_BIO"] == "#008d34"
+    assert colors["ZAW_GELB"] == "#fecb00"
+    assert colors["ZAW_PAP"] == "#0061a6"
+    assert colors["ZAW_REST_2W"] == "#2f3639"
+    assert colors["ZAW_REST_W"] == "#9e9e9e"   # '99999' ungültig -> Grau
+    assert colors["ZAW_SCHAD"] == "#e3000e"
+
+
+def test_feed_embeds_zaw_colors(app_server):
+    """Jedes VEVENT bekommt die exakte ZAW-Tonnenfarbe als X-ZAW-COLOR mit,
+    damit die Web-Vorschau exakt wie ZAW einfärben kann."""
+    r = requests.get(app_server + "/feed",
+                     params={"city": "Testheim", "street": "Hauptstraße", "nr": "1"},
+                     timeout=10)
+    body = unfold(r.text)
+    assert "X-ZAW-COLOR:#008d34" in body   # Bio grün
+    assert "X-ZAW-COLOR:#0061a6" in body   # Papier blau
+    assert "X-ZAW-COLOR:#e3000e" in body   # Schadstoff rot
+    # die beiden Restmüll-Typen MÜSSEN sich farblich unterscheiden
+    assert "X-ZAW-COLOR:#2f3639" in body   # 14-täglich (fast schwarz)
+    assert "X-ZAW-COLOR:#9e9e9e" in body   # wöchentlich (grau)
+
+
 def test_trash_requires_params(app_server):
     assert requests.get(app_server + "/api/trash",
                         params={"city_id": "100"}, timeout=10).status_code == 400
@@ -54,10 +83,11 @@ def test_unknown_path_404(app_server):
 
 
 def test_landing_page_has_preview_assets(app_server):
-    """Landing Page bindet FullCalendar + ical.js (ES5) ein und hat #calendar."""
+    """Landing Page bindet FullCalendar + ical.js (ES5) ein und hat #calendar.
+    Wir parsen das ICS selbst (wegen X-ZAW-COLOR) -> KEIN icalendar-Plugin."""
     html = requests.get(app_server + "/", timeout=10).text
     assert "fullcalendar@6" in html
-    assert "@fullcalendar/icalendar@6" in html
+    assert "@fullcalendar/icalendar" not in html  # Plugin nicht mehr nötig
     assert "ical.es5.min.cjs" in html  # ES5-Build registriert globales ICAL
     assert 'id="calendar"' in html
     assert 'id="btn-preview"' in html
