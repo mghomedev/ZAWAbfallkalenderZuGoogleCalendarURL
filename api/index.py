@@ -77,6 +77,12 @@ ROBOTS_TXT = (
     "Disallow: /feed\n"
 )
 
+# Google Search Console Verifizierung. Google erwartet die Datei
+# /google<token>.html mit genau einer Zeile als Inhalt. Statische Dateien im
+# Repo-Root liefert der Catch-all-Handler nicht aus (alle Pfade landen hier),
+# daher wird der Inhalt – wie robots.txt – inline ausgeliefert.
+GOOGLE_SITE_VERIFICATION = "google775b279a195202b2.html"
+
 
 class handler(BaseHTTPRequestHandler):
     def _client_ip(self) -> str:
@@ -92,6 +98,13 @@ class handler(BaseHTTPRequestHandler):
 
         if path == "/robots.txt":
             self._text(200, ROBOTS_TXT, content_type="text/plain")
+            return
+
+        # Google Search Console: /google<token>.html mit exaktem Inhalt.
+        # Vor dem Rate-Limit, damit Googles Verifizierungs-Abruf nie 429 bekommt.
+        if path == "/" + GOOGLE_SITE_VERIFICATION:
+            self._text(200, "google-site-verification: " + GOOGLE_SITE_VERIFICATION,
+                       content_type="text/html; charset=utf-8")
             return
 
         # Best-effort Rate-Limit (greift v.a. bei Cache-umgehender Enumeration).

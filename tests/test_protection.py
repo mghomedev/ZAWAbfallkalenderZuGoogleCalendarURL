@@ -138,6 +138,15 @@ def test_robots_txt(app_server):
     assert "Disallow: /feed" in r.text
 
 
+def test_google_site_verification_file(app_server):
+    """Die Google-Search-Console-Verifizierungsdatei wird mit exaktem Inhalt
+    ausgeliefert (statische Root-Dateien fängt der Catch-all-Handler ab)."""
+    token = "google775b279a195202b2.html"
+    r = requests.get(app_server + "/" + token, timeout=10)
+    assert r.status_code == 200
+    assert r.text.strip() == "google-site-verification: " + token
+
+
 def test_feed_has_24h_edge_cache(app_server):
     r = requests.get(app_server + "/feed", params=HAUPT, timeout=10)
     assert "s-maxage=86400" in r.headers.get("Cache-Control", "")
