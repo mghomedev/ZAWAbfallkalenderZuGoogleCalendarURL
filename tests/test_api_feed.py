@@ -157,6 +157,35 @@ def test_feed_unknown_street_404(app_server):
 
 
 # --------------------------------------------------------------------------- #
+# Feed: pseudoanonyme Variante (cid + aid statt Adresse)
+# --------------------------------------------------------------------------- #
+def test_feed_by_ids_works(app_server):
+    """/feed?cid=...&aid=... liefert ohne Adresse einen gültigen Kalender."""
+    r = requests.get(app_server + "/feed",
+                     params={"cid": "100", "aid": "201"}, timeout=10)
+    assert r.status_code == 200
+    assert r.headers["Content-Type"].startswith("text/calendar")
+    assert "BEGIN:VCALENDAR" in r.text and "BEGIN:VEVENT" in r.text
+
+
+def test_feed_by_ids_matches_readable(app_server):
+    """cid/aid liefert exakt denselben Plan wie die Klartext-Adresse (nr=1->201)."""
+    by_ids = requests.get(app_server + "/feed",
+                          params={"cid": "100", "aid": "201"}, timeout=10).text
+    readable = requests.get(app_server + "/feed",
+                            params={"city": "Testheim", "street": "Hauptstraße", "nr": "1"},
+                            timeout=10).text
+    assert by_ids.count("BEGIN:VEVENT") == readable.count("BEGIN:VEVENT")
+    assert "X-ZAW-COLOR:#008d34" in unfold(by_ids)  # Farben auch hier eingebettet
+
+
+def test_feed_ids_partial_is_400(app_server):
+    """Nur cid (ohne aid) und ohne Adresse -> 400 (keine ausreichenden Parameter)."""
+    r = requests.get(app_server + "/feed", params={"cid": "100"}, timeout=10)
+    assert r.status_code == 400
+
+
+# --------------------------------------------------------------------------- #
 # Feed: Inhalt & Header
 # --------------------------------------------------------------------------- #
 def test_feed_basic_content(app_server):

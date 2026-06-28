@@ -84,10 +84,17 @@ def test_housenumber_freetext_mode(app_server, page):
     page.fill("#hn-input", "56")
     page.dispatch_event("#hn-input", "input")
     _wait_result(page)
+    # Klartext-Variante zeigt die eingegebene Hausnummer (kein stilles nr=1)
+    page.uncheck("#anon")
     feed = page.text_content("#url-box")
     qs = parse_qs(urlparse(feed).query)
     assert qs["nr"] == ["56"]
     assert qs["street"] == ["Frankensteiner Str."]
+    # und die pseudoanonyme Variante nutzt die Straßen-Sammelzone (area_id=210)
+    page.check("#anon")
+    qs2 = parse_qs(urlparse(page.text_content("#url-box")).query)
+    assert qs2["cid"] == ["100"] and qs2["aid"] == ["210"]
+    assert "nr" not in qs2 and "street" not in qs2
 
 
 # --------------------------------------------------------------------------- #
@@ -100,6 +107,8 @@ def test_exhaustive_url_generation(app_server, page):
     # Der gesamte Kreuzproduktraum wird im Browser durchlaufen; updateUrl() ist
     # die echte Produktionsfunktion. Wir prüfen, dass die erzeugten Query-Parameter
     # die Auswahl exakt widerspiegeln. Rückgabe: nur Fehlversuche.
+    # Beide URL-Varianten werden geprüft: pseudoanonym (cid+aid) und lesbar
+    # (city/street/nr). Testheim/Hauptstraße/1 -> city_id=100, area_id=201.
     result = page.evaluate(
         """({eveOpts, mornOpts}) => {
             const cbs = [...document.querySelectorAll('#trash-checks input')];
@@ -109,46 +118,62 @@ def test_exhaustive_url_generation(app_server, page):
             const prefill = document.getElementById('btn-prefill');
             const gcal = document.getElementById('btn-gcal');
             const dl = document.getElementById('btn-dl');
+            const anon = document.getElementById('anon');
             const fails = [];
             let total = 0;
-            for (let mask = 0; mask < (1 << cbs.length); mask++) {
-              const selected = [];
-              cbs.forEach((cb, i) => { cb.checked = !!(mask & (1 << i)); if (cb.checked) selected.push(cb.value); });
-              for (const ev of eveOpts) {
-                for (const mo of mornOpts) {
-                  eve.value = ev; morn.value = mo;
-                  window.updateUrl();
-                  total++;
-                  const feed = box.textContent;
-                  const u = new URL(feed);
-                  const sp = u.searchParams;
-                  const errs = [];
-                  if (!feed.includes('/feed?')) errs.push('not a feed url');
-                  if (sp.get('city') !== 'Testheim') errs.push('city');
-                  if (sp.get('street') !== 'Hauptstraße') errs.push('street');
-                  if (sp.get('nr') !== '1') errs.push('nr');
-                  if (sp.get('eve') !== ev) errs.push('eve');
-                  if (sp.get('morn') !== mo) errs.push('morn');
-                  const typesParam = sp.get('types');
-                  if (selected.length === 0) {
-                    if (typesParam !== null) errs.push('types should be absent');
-                  } else {
-                    const got = (typesParam || '').split(',').filter(Boolean).sort().join(',');
-                    const want = [...selected].sort().join(',');
-                    if (got !== want) errs.push('types ' + got + ' != ' + want);
+            for (const anonState of [false, true]) {
+              anon.checked = anonState;
+              for (let mask = 0; mask < (1 << cbs.length); mask++) {
+                const selected = [];
+                cbs.forEach((cb, i) => { cb.checked = !!(mask & (1 << i)); if (cb.checked) selected.push(cb.value); });
+                for (const ev of eveOpts) {
+                  for (const mo of mornOpts) {
+                    eve.value = ev; morn.value = mo;
+                    window.updateUrl();
+                    total++;
+                    const feed = box.textContent;
+                    const sp = new URL(feed).searchParams;
+                    const errs = [];
+                    if (!feed.includes('/feed?')) errs.push('not a feed url');
+                    if (anonState) {
+                      if (sp.get('cid') !== '100') errs.push('cid ' + sp.get('cid'));
+                      if (sp.get('aid') !== '201') errs.push('aid ' + sp.get('aid'));
+                      if (sp.get('city') !== null) errs.push('city should be absent');
+                      if (sp.get('street') !== null) errs.push('street should be absent');
+                      if (sp.get('nr') !== null) errs.push('nr should be absent');
+                    } else {
+                      if (sp.get('city') !== 'Testheim') errs.push('city');
+                      if (sp.get('street') !== 'Hauptstraße') errs.push('street');
+                      if (sp.get('nr') !== '1') errs.push('nr');
+                      if (sp.get('cid') !== null) errs.push('cid should be absent');
+                      if (sp.get('aid') !== null) errs.push('aid should be absent');
+                    }
+                    if (sp.get('eve') !== ev) errs.push('eve');
+                    if (sp.get('morn') !== mo) errs.push('morn');
+                    const typesParam = sp.get('types');
+                    if (selected.length === 0) {
+                      if (typesParam !== null) errs.push('types should be absent');
+                    } else {
+                      const got = (typesParam || '').split(',').filter(Boolean).sort().join(',');
+                      const want = [...selected].sort().join(',');
+                      if (got !== want) errs.push('types ' + got + ' != ' + want);
+                    }
+                    // prefill ist IMMER lesbar (zum Wiederbefüllen) + trägt das anon-Flag
+                    const pf = new URL(prefill.href);
+                    if (pf.pathname !== '/') errs.push('prefill path');
+                    if (pf.searchParams.get('city') !== 'Testheim') errs.push('prefill city');
+                    if (pf.searchParams.get('nr') !== '1') errs.push('prefill nr');
+                    if (pf.searchParams.get('eve') !== ev) errs.push('prefill eve');
+                    if (pf.searchParams.get('morn') !== mo) errs.push('prefill morn');
+                    if (pf.searchParams.get('anon') !== (anonState ? '1' : '0')) errs.push('prefill anon');
+                    // gcal verweist auf die statische "Per URL hinzufügen"-Seite
+                    if (gcal.href !== 'https://calendar.google.com/calendar/u/0/r/settings/addbyurl')
+                      errs.push('gcal href ' + gcal.href);
+                    // Download-Button zeigt immer auf die aktuelle Feed-URL (.ics)
+                    if (dl.href !== feed) errs.push('dl href ' + dl.href);
+                    if (!(dl.getAttribute('download') || '').endsWith('.ics')) errs.push('dl filename');
+                    if (errs.length) fails.push({anonState, mask, ev, mo, errs});
                   }
-                  // prefill teilt denselben Querystring, nur Pfad '/' statt '/feed'
-                  const pf = new URL(prefill.href);
-                  if (pf.search !== u.search) errs.push('prefill query mismatch');
-                  if (pf.pathname !== '/') errs.push('prefill path');
-                  // gcal verweist auf die statische "Per URL hinzufügen"-Seite
-                  // (Google prefüllt url= nicht zuverlässig; wir kopieren stattdessen)
-                  if (gcal.href !== 'https://calendar.google.com/calendar/u/0/r/settings/addbyurl')
-                    errs.push('gcal href ' + gcal.href);
-                  // Download-Button zeigt immer auf die aktuelle Feed-URL (.ics)
-                  if (dl.href !== feed) errs.push('dl href ' + dl.href);
-                  if (!(dl.getAttribute('download') || '').endsWith('.ics')) errs.push('dl filename');
-                  if (errs.length) fails.push({mask, ev, mo, errs});
                 }
               }
             }
@@ -156,13 +181,15 @@ def test_exhaustive_url_generation(app_server, page):
         }""",
         {"eveOpts": EVE_OPTIONS, "mornOpts": MORN_OPTIONS},
     )
-    assert result["total"] == (1 << len(TRASH)) * len(EVE_OPTIONS) * len(MORN_OPTIONS)
+    assert result["total"] == 2 * (1 << len(TRASH)) * len(EVE_OPTIONS) * len(MORN_OPTIONS)
     assert result["failCount"] == 0, f"{result['failCount']} Fehlkombinationen, z.B.: {result['fails']}"
 
 
 # --------------------------------------------------------------------------- #
 # Die erzeugten Feed-URLs wirklich abrufen und Inhalt prüfen
 # --------------------------------------------------------------------------- #
+# Beide URL-Varianten (pseudoanonym cid/aid + lesbar) werden je Fall abgerufen.
+@pytest.mark.parametrize("anon", [True, False], ids=["anon", "klartext"])
 @pytest.mark.parametrize("selected,eve,morn,checks", [
     (["ZAW_BIO"], "22:00", "allday",
      {"has": ["Bioabfall"], "hasnot": ["Gelber Sack", "Restmüll"]}),
@@ -175,21 +202,29 @@ def test_exhaustive_url_generation(app_server, page):
     (TRASH, "off", "allday",
      {"has": ["Bioabfall"], "hasnot": ["Tonne rausstellen"]}),
 ])
-def test_generated_feed_urls_are_correct(app_server, page, selected, eve, morn, checks):
+def test_generated_feed_urls_are_correct(app_server, page, selected, eve, morn, checks, anon):
     _open(page, app_server)
     _pick_address_with_hn(page)
     feed = page.evaluate(
-        """({selected, eve, morn}) => {
+        """({selected, eve, morn, anon}) => {
             const cbs = [...document.querySelectorAll('#trash-checks input')];
             cbs.forEach(cb => cb.checked = selected.includes(cb.value));
             document.getElementById('eve-time').value = eve;
             document.getElementById('morn-mode').value = morn;
+            document.getElementById('anon').checked = anon;
             window.updateUrl();
             return document.getElementById('url-box').textContent;
         }""",
-        {"selected": selected, "eve": eve, "morn": morn},
+        {"selected": selected, "eve": eve, "morn": morn, "anon": anon},
     )
-    # Genau diese vom Browser erzeugte URL abrufen
+    # URL-Form passend zur Variante
+    qs = parse_qs(urlparse(feed).query)
+    if anon:
+        assert qs.get("cid") == ["100"] and qs.get("aid") == ["201"]
+        assert "city" not in qs
+    else:
+        assert qs.get("city") == ["Testheim"] and "cid" not in qs
+    # Genau diese vom Browser erzeugte URL abrufen – Inhalt ist variantenunabhängig
     r = requests.get(feed, timeout=10)
     assert r.status_code == 200, feed
     body = unfold(r.text)
@@ -212,42 +247,119 @@ def _state(page):
     }
 
 
+# aid = erwartete Sammelzone (area_id) laut Mock: Hauptstraße 1/2/5 -> 201/202/205,
+# Frankensteiner Str. (ohne Hausnummern) -> Straßen-area_id 210.
 ROUNDTRIP_CASES = [
-    dict(city="Testheim", street="Hauptstraße", nr="1",
+    dict(city="Testheim", street="Hauptstraße", nr="1", aid="201",
          types=["ZAW_BIO", "ZAW_GELB"], eve="21:00", morn="allday"),
-    dict(city="Testheim", street="Hauptstraße", nr="2",
+    dict(city="Testheim", street="Hauptstraße", nr="2", aid="202",
          types=["ZAW_REST_2W"], eve="22:00", morn="off"),
-    dict(city="Testheim", street="Hauptstraße", nr="5",
+    dict(city="Testheim", street="Hauptstraße", nr="5", aid="205",
          types=TRASH, eve="off", morn="06:00"),
-    dict(city="Testheim", street="Frankensteiner Str.", nr="56",
+    dict(city="Testheim", street="Frankensteiner Str.", nr="56", aid="210",
          types=["ZAW_BIO"], eve="20:00", morn="allday"),
 ]
 
 
+# Beide Varianten der Pseudoanonymisierungs-Checkbox werden getestet.
+@pytest.mark.parametrize("anon", [False, True], ids=["klartext", "anon"])
 @pytest.mark.parametrize("case", ROUNDTRIP_CASES,
                          ids=lambda c: f"{c['street']}-{','.join(c['types'])}-{c['eve']}-{c['morn']}")
-def test_prefill_roundtrip(app_server, page, case):
+def test_prefill_roundtrip(app_server, page, case, anon):
+    # Prefill-URL ist immer lesbar; anon=0/1 steuert die erzeugte Feed-URL-Form.
     query = urlencode({
         "city": case["city"], "street": case["street"], "nr": case["nr"],
         "types": ",".join(case["types"]), "eve": case["eve"], "morn": case["morn"],
+        "anon": "1" if anon else "0",
     })
     _open(page, app_server, query)
     _wait_result(page)
     st = _state(page)
 
+    # anon-Schalter aus der URL wiederhergestellt
+    assert page.eval_on_selector("#anon", "e => e.checked") is anon
     # Abfalltypen exakt wiederhergestellt (DAS ist der wiederkehrende Bug)
     assert st["checked"] == sorted(case["types"]), \
         f"Checkboxen falsch wiederhergestellt: {st['checked']} != {sorted(case['types'])}"
     # eve/morn wiederhergestellt
     assert st["eve"] == case["eve"]
     assert st["morn"] == case["morn"]
-    # Idempotenz: regenerierte Feed-URL spiegelt die Auswahl exakt
+    # Idempotenz: regenerierte Feed-URL spiegelt die Auswahl exakt (je Variante)
     qs = parse_qs(urlparse(st["feed"]).query)
-    assert qs["city"] == [case["city"]]
-    assert qs["nr"] == [case["nr"]]
+    if anon:
+        assert qs["cid"] == ["100"]
+        assert qs["aid"] == [case["aid"]]
+        assert "city" not in qs and "nr" not in qs
+    else:
+        assert qs["city"] == [case["city"]]
+        assert qs["nr"] == [case["nr"]]
     assert qs["eve"] == [case["eve"]]
     assert qs["morn"] == [case["morn"]]
     assert sorted(qs["types"][0].split(",")) == sorted(case["types"])
+
+
+# --------------------------------------------------------------------------- #
+# Pseudoanonymisierte URL (cid+aid statt Adresse)
+# --------------------------------------------------------------------------- #
+def test_anon_checkbox_default_on_and_toggles(app_server, page):
+    """Default an -> Feed-URL nutzt cid+aid (keine Adresse). Aus -> Klartext."""
+    _open(page, app_server)
+    _pick_address_with_hn(page)
+
+    assert page.eval_on_selector("#anon", "e => e.checked") is True
+    feed = page.text_content("#url-box")
+    qs = parse_qs(urlparse(feed).query)
+    assert qs.get("cid") == ["100"] and qs.get("aid") == ["201"]
+    assert "city" not in qs and "street" not in qs and "nr" not in qs
+
+    # Schalter aus -> lesbare Variante
+    page.uncheck("#anon")
+    feed = page.text_content("#url-box")
+    qs = parse_qs(urlparse(feed).query)
+    assert qs.get("city") == ["Testheim"]
+    assert qs.get("street") == ["Hauptstraße"]
+    assert qs.get("nr") == ["1"]
+    assert "cid" not in qs and "aid" not in qs
+
+
+def test_anon_feed_url_returns_same_schedule(app_server, page):
+    """Die pseudoanonyme Feed-URL liefert denselben gültigen Kalender."""
+    _open(page, app_server)
+    _pick_address_with_hn(page)
+    anon_feed = page.text_content("#url-box")
+    assert "cid=100" in anon_feed and "aid=201" in anon_feed
+
+    r = requests.get(anon_feed, timeout=10)
+    assert r.status_code == 200
+    assert r.headers["Content-Type"].startswith("text/calendar")
+    body = unfold(r.text)
+    assert "BEGIN:VCALENDAR" in body and "BEGIN:VEVENT" in body
+    # gleiche Termine wie die lesbare Variante (nr=1 -> Zone 201)
+    readable = requests.get(app_server + "/feed",
+                            params={"city": "Testheim", "street": "Hauptstraße", "nr": "1"},
+                            timeout=10)
+    assert r.text.count("BEGIN:VEVENT") == readable.text.count("BEGIN:VEVENT")
+
+
+def test_cleartext_url_defaults_checkbox_off(app_server, page):
+    """Kommt jemand mit Klartext-Adresse (ohne anon-Param) rein, ist die Checkbox
+    AUS – seine URL war ja bereits im Klartext (Anforderung)."""
+    query = urlencode({"city": "Testheim", "street": "Hauptstraße", "nr": "1"})
+    _open(page, app_server, query)
+    _wait_result(page)
+    assert page.eval_on_selector("#anon", "e => e.checked") is False
+    qs = parse_qs(urlparse(page.text_content("#url-box")).query)
+    assert qs.get("city") == ["Testheim"]  # bleibt lesbar
+    assert "cid" not in qs
+
+
+def test_fresh_visit_defaults_checkbox_on(app_server, page):
+    """Ohne jegliche URL-Parameter ist die Pseudoanonymisierung an (Default)."""
+    _open(page, app_server)
+    assert page.eval_on_selector("#anon", "e => e.checked") is True
+    _pick_address_with_hn(page)
+    qs = parse_qs(urlparse(page.text_content("#url-box")).query)
+    assert qs.get("cid") == ["100"]  # anonym
 
 
 # --------------------------------------------------------------------------- #
@@ -432,14 +544,26 @@ def test_clearing_city_resets_stale_result(app_server, page):
 
 
 def test_city_without_streets_ui(app_server, page):
+    """Gemeinde ohne Straßen – beide URL-Varianten erzeugen einen gültigen Feed."""
     _open(page, app_server)
     page.select_option("#city", label="Inselstadt")
     _wait_result(page)
+
+    # Default: pseudoanonym -> cid/aid (Inselstadt: city_id=102, area_id=50)
+    feed = page.text_content("#url-box")
+    qs = parse_qs(urlparse(feed).query)
+    assert qs["cid"] == ["102"] and qs["aid"] == ["50"]
+    assert "city" not in qs and "street" not in qs
+    r = requests.get(feed, timeout=10)
+    assert r.status_code == 200, feed
+    assert "BEGIN:VCALENDAR" in r.text
+
+    # Klartext: city ohne street
+    page.uncheck("#anon")
     feed = page.text_content("#url-box")
     qs = parse_qs(urlparse(feed).query)
     assert qs["city"] == ["Inselstadt"]
-    assert "street" not in qs
-    # und die URL liefert tatsächlich einen Feed
+    assert "street" not in qs and "cid" not in qs
     r = requests.get(feed, timeout=10)
     assert r.status_code == 200, feed
     assert "BEGIN:VCALENDAR" in r.text

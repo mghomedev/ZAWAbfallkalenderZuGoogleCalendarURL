@@ -302,6 +302,23 @@ def get_schedule(
     return dates, city_id, area_id
 
 
+def get_schedule_by_ids(
+    service_id: str,
+    city_id,
+    area_id,
+    trash_filter: list[str] | None = None,
+) -> list[tuple[dt.date, str]]:
+    """Wie get_schedule(), aber direkt über die (anonymen) IDs city_id+area_id.
+
+    Vermeidet die Adressauflösung – die Feed-URL enthält dann weder Straße noch
+    Hausnummer (Datenschutz: der Abo-Dienst sieht nur Gemeinde + Sammelzone)."""
+    s = requests.Session()
+    s.headers.update({"Accept-Encoding": "identity"})
+    names = fetch_trash_names(s, service_id, city_id, area_id)
+    dates = fetch_dates(s, service_id, city_id, area_id, names)
+    return filter_dates_by_trash(dates, names, trash_filter)
+
+
 def pretty_label(title: str) -> str:
     low = title.lower()
     for key, label in EMOJI_MAP:

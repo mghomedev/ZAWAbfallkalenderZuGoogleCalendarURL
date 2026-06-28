@@ -32,10 +32,20 @@ ihres APIs auf diese Weise nicht mehr möchte.
   API-Basis über `ZAW_API_BASE` überschreibbar (`api_base()`), für Tests/Mock.
 - `api/index.py` — **einziger** Vercel-Entrypoint (BaseHTTPRequestHandler).
   Routen: `/` (Picker-HTML inline), `/feed` (+`/api/feed`), `/api/cities`,
-  `/api/streets`, `/api/trash`. URL-Parameter des Feeds: `city`, `nr` (Pflicht),
-  `street` (optional – nur bei Gemeinden mit Straßen), `name`, `types`
-  (exakte API-Namen, z.B. `ZAW_REST_2W`), `eve` (HH:MM oder `off`),
-  `morn` (`allday`|HH:MM|`off`). Liest `ZAW_API_BASE` per Request (`_api()`).
+  `/api/streets`, `/api/trash`. Feed-Adresse auf **zwei** Arten:
+  (a) Klartext `city`, `nr` (Pflicht) + `street` (optional, nur bei Gemeinden mit
+  Straßen); (b) **pseudoanonym** `cid`=city_id + `aid`=area_id (keine Adresse in
+  der URL – `get_schedule_by_ids`). Dazu `name`, `types` (exakte API-Namen, z.B.
+  `ZAW_REST_2W`), `eve` (HH:MM oder `off`), `morn` (`allday`|HH:MM|`off`).
+  Liest `ZAW_API_BASE` per Request (`_api()`).
+- **Pseudoanonymisierungs-Checkbox** im Picker (Default AN → Feed-URL nutzt
+  `cid`+`aid`, Google sieht nie die Adresse; AUS → lesbare `city/street/nr`-URL,
+  praktisch bei mehreren Standorten). Kommt jemand bereits mit Klartext-Adresse
+  in der `/`-URL rein (ohne `anon`-Param), ist die Checkbox AUS; `anon=1/0` im
+  Prefill-Link gewinnt immer. Der Experten-Prefill-Link ist IMMER lesbar (sonst
+  könnte der Picker nicht wieder befüllt werden). `aid` ist eine *Sammelzone*
+  (mehrere Häuser) → pseudonym, nicht voll anonym. Beide Varianten sind durch
+  Tests abgedeckt (Exhaustive- und Roundtrip-Tests laufen für anon UND klartext).
 - `pyproject.toml` — `[tool.vercel] entrypoint = "api.index:handler"` + Deps.
 - `vercel.json` — Rewrite `/feed` → `/api/feed`.
 

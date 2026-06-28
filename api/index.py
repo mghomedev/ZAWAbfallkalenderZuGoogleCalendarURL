@@ -28,8 +28,8 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from zaw_ics_gen import (  # noqa: E402
-    get_schedule, build_ics, resolve_address, fetch_trash_types,
-    fetch_trash_colors, cached_get_json, clear_cache,
+    get_schedule, get_schedule_by_ids, build_ics, resolve_address,
+    fetch_trash_types, fetch_trash_colors, cached_get_json, clear_cache,
 )
 
 
@@ -128,13 +128,19 @@ class handler(BaseHTTPRequestHandler):
         city = _first(params, "city")
         street = _first(params, "street")
         nr = _first(params, "nr")
+        cid = _first(params, "cid")   # anonyme Variante: nur IDs, keine Adresse
+        aid = _first(params, "aid")
 
-        # street ist optional: Gemeinden ohne Straßenauswahl (has_streets=false)
-        # liefern auch ohne street-Parameter einen Feed.
-        if not city or not nr:
+        # Anonyme Variante (cid+aid) enthält weder Straße noch Hausnummer.
+        # Klartext-Variante braucht weiterhin city+nr (street optional bei
+        # Gemeinden ohne Straßenauswahl).
+        anon = bool(cid and aid)
+        if not anon and (not city or not nr):
             self._text(400,
-                "Pflichtparameter fehlen: city, nr (street nur bei Gemeinden mit Straßen)\n\n"
+                "Pflichtparameter fehlen: city + nr (street nur bei Gemeinden mit Straßen)\n"
+                "oder die anonyme Variante cid + aid.\n\n"
                 "Beispiel: /feed?city=Meine-Gemeinde&street=Meine+Stra%C3%9Fe&nr=1\n"
+                "Anonym:   /feed?cid=100&aid=201\n"
                 "\nOptionale Parameter:\n"
                 "  name    – Kalender-Anzeigename\n"
                 "  types   – Abfalltypen kommagetrennt (z.B. ZAW_BIO,ZAW_GELB)\n"
@@ -142,7 +148,7 @@ class handler(BaseHTTPRequestHandler):
                 "  morn    – Morgen-Modus: allday (default), HH:MM, oder off\n")
             return
 
-        cal_name = _first(params, "name") or f"Abfall {city} (ZAW)"
+        cal_name = _first(params, "name") or (f"Abfall {city} (ZAW)" if city else "Abfall (ZAW)")
         types_raw = _first(params, "types")
         trash_filter = [t.strip() for t in types_raw.split(",") if t.strip()] if types_raw else None
         eve_time = _first(params, "eve")
@@ -162,8 +168,12 @@ class handler(BaseHTTPRequestHandler):
             kw["morning_time"] = morn_mode
 
         try:
-            dates, city_id, area_id = get_schedule(
-                "zaw", city, street or "", nr, trash_filter=trash_filter)
+            if anon:
+                dates = get_schedule_by_ids("zaw", cid, aid, trash_filter=trash_filter)
+                city_id, area_id = cid, aid
+            else:
+                dates, city_id, area_id = get_schedule(
+                    "zaw", city, street or "", nr, trash_filter=trash_filter)
             # exakte ZAW-Tonnenfarben (gleicher 24h-Cache wie /api/trash, kein
             # zusätzlicher Upstream-Request) ins ICS einbetten -> Web-Vorschau.
             colors = fetch_trash_colors(None, "zaw", city_id, area_id)
@@ -284,6 +294,8 @@ INDEX_HTML = r"""<!DOCTYPE html>
   .result.visible { display: block; }
   .url-box { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: .6rem .75rem; font-family: monospace; font-size: .78rem; word-break: break-all; margin: .75rem 0; user-select: all; }
   .url-warn { margin: .5rem 0 .25rem; padding: .55rem .7rem; font-size: .78rem; line-height: 1.4; color: #92400e; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px; }
+  .anon-toggle { display: flex; align-items: flex-start; gap: .45rem; font-size: .8rem; color: var(--muted); line-height: 1.35; margin: .25rem 0 .75rem; cursor: pointer; }
+  .anon-toggle input { width: auto; margin-top: .15rem; flex-shrink: 0; }
   .buttons { display: flex; gap: .75rem; margin-top: 1rem; flex-wrap: wrap; }
   .btn { flex: 1; min-width: 140px; padding: .7rem 1rem; border: none; border-radius: 8px; font-size: .85rem; font-weight: 600; cursor: pointer; text-align: center; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: .4rem; transition: opacity .15s; }
   .btn:hover { opacity: .85; }
@@ -378,6 +390,12 @@ INDEX_HTML = r"""<!DOCTYPE html>
   </div>
 
   <div id="result" class="result">
+    <label class="anon-toggle">
+      <input type="checkbox" id="anon" checked>
+      <span>Pseudoanonymisierte URL (Stadt + Bereichscode statt Adresse) &ndash;
+        empfohlen f&uuml;r Datenschutz. Ausschalten f&uuml;r lesbare URLs (praktisch
+        bei mehreren Standorten).</span>
+    </label>
     <label>Deine Kalender-URL</label>
     <div id="url-box" class="url-box"></div>
     <div class="url-warn">
@@ -466,6 +484,15 @@ const urlBox = document.getElementById("url-box");
 const btnGcal = document.getElementById("btn-gcal");
 const btnCopy = document.getElementById("btn-copy");
 const btnDl = document.getElementById("btn-dl");
+const anonEl = document.getElementById("anon");
+// Default: AN (Pseudoanonymisierung, Datenschutz). Überschreibung:
+//  - explizites anon=1/0 in der URL gewinnt immer.
+//  - kommt jemand bereits mit Klartext-Adresse (city/street/nr) in der URL rein,
+//    ist die Checkbox AUS – seine URL war ja schon im Klartext.
+if (QS.anon === "1") anonEl.checked = true;
+else if (QS.anon === "0") anonEl.checked = false;
+else if (QS.city || QS.street || QS.nr) anonEl.checked = false;
+anonEl.addEventListener("change", updateUrl);
 const btnPrefill = document.getElementById("btn-prefill");
 
 // Pre-fill eve/morn from URL
@@ -515,7 +542,7 @@ async function onCityChange() {
   if (opt.dataset.hasStreets === "false") {
     streetEl.innerHTML = '<option value="">Keine Stra\u00dfenauswahl n\u00f6tig</option>';
     await loadTrash(cityId, selectedCity.areaId);
-    buildUrl(opt.textContent, "", "");
+    buildUrl(opt.textContent, "", "", cityId, selectedCity.areaId);
     return;
   }
 
@@ -587,7 +614,7 @@ async function onStreetChange() {
     // Pre-fill house number from URL (input mode)
     if (QS.nr) {
       await loadTrash(selectedCity.id, street.area_id);
-      buildUrl(cityName, street.name, QS.nr);
+      buildUrl(cityName, street.name, QS.nr, selectedCity.id, street.area_id);
     }
   }
 }
@@ -602,7 +629,7 @@ async function onHnSelectChange() {
   const hn = street.house_numbers.find(h => h[0] === hnEl.value);
   if (hn) areaId = hn[1];
   await loadTrash(selectedCity.id, areaId);
-  buildUrl(cityName, street.name, hnEl.value);
+  buildUrl(cityName, street.name, hnEl.value, selectedCity.id, areaId);
 }
 
 hnEl.addEventListener("change", onHnSelectChange);
@@ -614,7 +641,7 @@ hnInput.addEventListener("input", async () => {
   const idx = parseInt(streetEl.value);
   const street = streetsData[idx];
   await loadTrash(selectedCity.id, street.area_id);
-  buildUrl(cityName, street.name, val);
+  buildUrl(cityName, street.name, val, selectedCity.id, street.area_id);
 });
 
 async function loadTrash(cityId, areaId) {
@@ -659,9 +686,11 @@ eveEl.addEventListener("change", updateUrl);
 mornEl.addEventListener("change", updateUrl);
 
 let currentCity = "", currentStreet = "", currentNr = "";
+let currentCityId = "", currentAreaId = "";
 
-function buildUrl(city, street, nr) {
+function buildUrl(city, street, nr, cityId, areaId) {
   currentCity = city; currentStreet = street; currentNr = nr;
+  currentCityId = cityId || ""; currentAreaId = areaId || "";
   updateUrl();
 }
 
@@ -670,28 +699,41 @@ function buildUrl(city, street, nr) {
 function resetResult() {
   resultEl.classList.remove("visible");
   currentCity = currentStreet = currentNr = "";
+  currentCityId = currentAreaId = "";
   trashChecks.innerHTML = "";
   trashGroup.style.display = "none";
 }
 
-function updateUrl() {
-  if (!currentCity) return;
-  const p = new URLSearchParams();
-  p.set("city", currentCity);
-  if (currentStreet) p.set("street", currentStreet);
-  p.set("nr", currentNr || "1");
-
-  // Abfalltyp-Filter: exakte API-Namen verwenden (z.B. ZAW_BIO, ZAW_REST_2W)
+// Hängt die gemeinsamen Parameter (Filter + Zeiten) an einen URLSearchParams an.
+function _appendCommon(p) {
   const allCbs = [...trashChecks.querySelectorAll("input[type=checkbox]")];
   const checked = allCbs.filter(cb => cb.checked);
   if (checked.length > 0) {
+    // Abfalltyp-Filter: exakte API-Namen (z.B. ZAW_BIO, ZAW_REST_2W)
     p.set("types", checked.map(cb => cb.value).join(","));
   }
-
   p.set("eve", eveEl.value);
   p.set("morn", mornEl.value);
+  return p;
+}
 
-  const url = BASE + "/feed?" + p.toString();
+function updateUrl() {
+  if (!currentCity) return;
+  const anon = anonEl.checked && currentCityId && currentAreaId;
+
+  // Feed-URL: pseudoanonym (Stadt+Bereichscode) ODER lesbar (Adresse)
+  const fp = new URLSearchParams();
+  if (anon) {
+    fp.set("cid", currentCityId);
+    fp.set("aid", currentAreaId);
+  } else {
+    fp.set("city", currentCity);
+    if (currentStreet) fp.set("street", currentStreet);
+    fp.set("nr", currentNr || "1");
+  }
+  _appendCommon(fp);
+
+  const url = BASE + "/feed?" + fp.toString();
   urlBox.textContent = url;
   // Google prefüllt das url=-Feld NICHT zuverlässig. Wir öffnen die
   // "Per URL hinzufügen"-Seite und kopieren die Feed-URL in die Zwischenablage,
@@ -702,7 +744,16 @@ function updateUrl() {
   btnDl.href = url;
   const fnameParts = [currentCity, currentStreet, currentNr].filter(Boolean).join("_");
   btnDl.download = ("Abfall_" + fnameParts).replace(/[^\w.-]+/g, "_") + ".ics";
-  btnPrefill.href = BASE + "/?" + p.toString();
+
+  // Prefill (Experten): IMMER lesbar, damit der Picker wieder befüllt werden kann;
+  // der Anonymisierungs-Schalter wird als anon=0/1 mitgegeben.
+  const pf = new URLSearchParams();
+  pf.set("city", currentCity);
+  if (currentStreet) pf.set("street", currentStreet);
+  pf.set("nr", currentNr || "1");
+  _appendCommon(pf);
+  pf.set("anon", anonEl.checked ? "1" : "0");
+  btnPrefill.href = BASE + "/?" + pf.toString();
   resultEl.classList.add("visible");
   btnCopy.textContent = "In Zwischenablage kopieren";
 }
