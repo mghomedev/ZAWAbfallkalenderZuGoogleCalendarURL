@@ -227,7 +227,12 @@ class handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Cache-Control", "public, s-maxage=86400, max-age=3600")
+        # Nur Erfolge lange cachen; Fehler (z.B. transientes 502) nicht, sonst
+        # bliebe der Picker bis zu 24h kaputt, obwohl ZAW längst wieder läuft.
+        if code == 200:
+            self.send_header("Cache-Control", "public, s-maxage=86400, max-age=3600")
+        else:
+            self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
@@ -281,6 +286,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
   .spinner { display: none; width: 1rem; height: 1rem; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; margin-left: .5rem; vertical-align: middle; }
   .spinner.active { display: inline-block; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .gcal-hint { margin-top: .6rem; font-size: .78rem; color: var(--muted); line-height: 1.4; text-align: center; }
   .prefill-link { display: block; margin-top: .75rem; font-size: .8rem; color: var(--muted); text-align: center; text-decoration: underline; cursor: pointer; }
   .prefill-link:hover { color: var(--accent); }
   .disclaimer { max-width: 520px; margin-top: 2rem; padding: 1rem; font-size: .72rem; color: var(--muted); line-height: 1.5; text-align: center; }
@@ -291,7 +297,21 @@ INDEX_HTML = r"""<!DOCTYPE html>
   .how-to ol { padding-left: 1.25rem; }
   .how-to code { background: var(--bg); padding: .1rem .3rem; border-radius: 4px; font-size: .8rem; }
   a { color: var(--accent); }
+  .btn-preview { width: 100%; margin-top: .75rem; padding: .6rem 1rem; border: 1px solid var(--border);
+    background: var(--card); color: var(--accent); border-radius: 8px; font-size: .85rem;
+    font-weight: 600; cursor: pointer; }
+  .btn-preview:hover { background: var(--bg); }
+  #preview-wrap { display: none; margin-top: 1rem; }
+  #calendar { font-size: .85rem; }
 </style>
+<!-- Vorschau: FullCalendar v6 + iCalendar-Plugin + ical.js (ES5, registriert globales ICAL).
+     Reihenfolge (defer erhält sie): Core -> ical.js -> Plugin.
+     WICHTIG: ical.js als .cjs MUSS von unpkg kommen (Content-Type text/javascript);
+     jsdelivr liefert .cjs als application/node -> Chromium blockt die Ausführung
+     (nosniff), dann bleibt das globale ICAL undefiniert und das Plugin stumm. -->
+<script defer src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.21/index.global.min.js"></script>
+<script defer src="https://unpkg.com/ical.js@2.1.0/dist/ical.es5.min.cjs"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/@fullcalendar/icalendar@6.1.21/index.global.min.js"></script>
 </head>
 <body>
 
@@ -350,9 +370,16 @@ INDEX_HTML = r"""<!DOCTYPE html>
     <div id="url-box" class="url-box"></div>
     <div class="buttons">
       <button class="btn btn-copy" id="btn-copy" onclick="copyUrl()">In Zwischenablage kopieren</button>
-      <a class="btn btn-gcal" id="btn-gcal" href="#" target="_blank">+ Google Kalender</a>
+      <a class="btn btn-gcal" id="btn-gcal" href="#" target="_blank" rel="noopener"
+         onclick="gcalClick()">Zu Google Kalender hinzuf&uuml;gen</a>
     </div>
+    <p id="gcal-hint" class="gcal-hint">Google fragt nach der URL &ndash; sie wird beim Klick
+      <strong>automatisch kopiert</strong>, also im ge&ouml;ffneten Google-Feld einfach
+      einf&uuml;gen (Strg+V) und &bdquo;Kalender hinzuf&uuml;gen&ldquo; klicken.</p>
     <a id="btn-prefill" href="#" class="prefill-link">Diese Auswahl als vorausgef&uuml;llte URL</a>
+    <button class="btn-preview" id="btn-preview" type="button" onclick="previewClick()">
+      Vorschau anzeigen (Termine pr&uuml;fen)</button>
+    <div id="preview-wrap"><div id="calendar"></div></div>
     <p class="note">
       <strong>Immer aktuell:</strong> Die Termine kommen direkt aus der ZAW-API &ndash; kein Cron,
       keine manuelle Pflege. Zum Schutz der ZAW-Server werden Antworten bis zu 24 h
@@ -370,7 +397,9 @@ INDEX_HTML = r"""<!DOCTYPE html>
   <ol>
     <li>W&auml;hle oben deine Gemeinde, Stra&szlig;e und Hausnummer.</li>
     <li>Optional: filtere Abfalltypen und stelle die Erinnerungszeiten ein.</li>
-    <li>Kopiere die generierte URL oder klicke &bdquo;+ Google Kalender&ldquo;.</li>
+    <li>Klicke &bdquo;Zu Google Kalender hinzuf&uuml;gen&ldquo; (URL wird kopiert) und f&uuml;ge sie
+        auf der Google-Seite ein &ndash; oder nutze &bdquo;In Zwischenablage kopieren&ldquo;.</li>
+    <li>Optional: &bdquo;Vorschau&ldquo; zeigt die Termine direkt hier zur Pr&uuml;fung.</li>
     <li>Google pollt den Feed automatisch &ndash; neue Termine erscheinen von selbst.</li>
   </ol>
   <p>
@@ -444,8 +473,7 @@ async function onCityChange() {
   streetEl.innerHTML = '<option value="">Wird geladen...</option>';
   streetEl.disabled = true;
   hnGroup.style.display = "none";
-  trashGroup.style.display = "none";
-  resultEl.classList.remove("visible");
+  resetResult();
   streetsData = [];
 
   const cityId = cityEl.value;
@@ -494,8 +522,7 @@ cityEl.addEventListener("change", onCityChange);
 
 async function onStreetChange() {
   hnGroup.style.display = "none";
-  trashGroup.style.display = "none";
-  resultEl.classList.remove("visible");
+  resetResult();
 
   const idx = streetEl.value;
   if (idx === "") return;
@@ -538,7 +565,7 @@ async function onStreetChange() {
 streetEl.addEventListener("change", onStreetChange);
 
 async function onHnSelectChange() {
-  if (!hnEl.value) { resultEl.classList.remove("visible"); return; }
+  if (!hnEl.value) { resetResult(); return; }
   const cityName = cityEl.options[cityEl.selectedIndex].textContent;
   const street = streetsData[parseInt(streetEl.value)];
   let areaId = street.area_id;
@@ -552,7 +579,7 @@ hnEl.addEventListener("change", onHnSelectChange);
 
 hnInput.addEventListener("input", async () => {
   const val = hnInput.value.trim();
-  if (!val) { resultEl.classList.remove("visible"); return; }
+  if (!val) { resetResult(); return; }
   const cityName = cityEl.options[cityEl.selectedIndex].textContent;
   const idx = parseInt(streetEl.value);
   const street = streetsData[idx];
@@ -603,6 +630,15 @@ function buildUrl(city, street, nr) {
   updateUrl();
 }
 
+// Versteckt das Ergebnis UND verwirft den generierten Zustand, damit eine
+// spätere Änderung an den Erinnerungs-Dropdowns nicht die alte Adresse zeigt.
+function resetResult() {
+  resultEl.classList.remove("visible");
+  currentCity = currentStreet = currentNr = "";
+  trashChecks.innerHTML = "";
+  trashGroup.style.display = "none";
+}
+
 function updateUrl() {
   if (!currentCity) return;
   const p = new URLSearchParams();
@@ -622,10 +658,57 @@ function updateUrl() {
 
   const url = BASE + "/feed?" + p.toString();
   urlBox.textContent = url;
-  btnGcal.href = "https://calendar.google.com/calendar/u/0/r/settings/addbyurl?url=" + encodeURIComponent(url);
+  // Google prefüllt das url=-Feld NICHT zuverlässig. Wir öffnen die
+  // "Per URL hinzufügen"-Seite und kopieren die Feed-URL in die Zwischenablage,
+  // damit der Nutzer sie dort nur noch einfügen muss.
+  btnGcal.href = "https://calendar.google.com/calendar/u/0/r/settings/addbyurl";
   btnPrefill.href = BASE + "/?" + p.toString();
   resultEl.classList.add("visible");
   btnCopy.textContent = "In Zwischenablage kopieren";
+}
+
+async function gcalClick() {
+  // Feed-URL in die Zwischenablage legen (Klick ist eine User-Geste).
+  try { await navigator.clipboard.writeText(urlBox.textContent); } catch (e) { /* egal */ }
+  // der Link öffnet danach die Google-Seite (kein preventDefault).
+}
+
+// --- Vorschau via FullCalendar + iCalendar-Plugin ------------------------- //
+let _calendar = null;
+function _previewReady() {
+  return typeof FullCalendar !== "undefined" && typeof FullCalendar.Calendar !== "undefined"
+    && typeof ICAL !== "undefined";  // ICAL ist Peer-Dependency des iCalendar-Plugins
+}
+function previewClick() {
+  const wrap = document.getElementById("preview-wrap");
+  const el = document.getElementById("calendar");
+  wrap.style.display = "block";
+  el.innerHTML = '<p style="color:var(--muted);font-size:.85rem">Vorschau lädt…</p>';
+  _renderPreviewWhenReady(0);
+}
+function _renderPreviewWhenReady(tries) {
+  const el = document.getElementById("calendar");
+  if (!_previewReady()) {
+    if (tries > 120) {  // ~12s gewartet
+      el.innerHTML = '<p style="color:var(--muted);font-size:.85rem">' +
+        'Vorschau nicht verfügbar (CDN blockiert?). Die Feed-URL funktioniert trotzdem.</p>';
+      return;
+    }
+    setTimeout(() => _renderPreviewWhenReady(tries + 1), 100);
+    return;
+  }
+  if (_calendar) { _calendar.destroy(); _calendar = null; }
+  el.innerHTML = "";
+  _calendar = new FullCalendar.Calendar(el, {
+    initialView: "listMonth",
+    headerToolbar: { left: "prev,next today", center: "title", right: "dayGridMonth,listMonth" },
+    events: { url: urlBox.textContent, format: "ics" },
+    height: "auto",
+    firstDay: 1,
+    noEventsContent: "Keine Termine im Zeitraum",
+  });
+  _calendar.render();
+  document.getElementById("preview-wrap").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 async function copyUrl() {

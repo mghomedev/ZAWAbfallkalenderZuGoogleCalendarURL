@@ -53,6 +53,23 @@ def test_unknown_path_404(app_server):
     assert requests.get(app_server + "/nope", timeout=10).status_code == 404
 
 
+def test_landing_page_has_preview_assets(app_server):
+    """Landing Page bindet FullCalendar + ical.js (ES5) ein und hat #calendar."""
+    html = requests.get(app_server + "/", timeout=10).text
+    assert "fullcalendar@6" in html
+    assert "@fullcalendar/icalendar@6" in html
+    assert "ical.es5.min.cjs" in html  # ES5-Build registriert globales ICAL
+    assert 'id="calendar"' in html
+    assert 'id="btn-preview"' in html
+
+
+def test_landing_page_gcal_button_static(app_server):
+    """Google-Button verweist auf die Add-by-URL-Seite (kein unzuverlässiges url=)."""
+    html = requests.get(app_server + "/", timeout=10).text
+    assert "addbyurl" in html
+    assert 'onclick="gcalClick()"' in html
+
+
 # --------------------------------------------------------------------------- #
 # Feed: Pflichtparameter & Fehlerfälle
 # --------------------------------------------------------------------------- #

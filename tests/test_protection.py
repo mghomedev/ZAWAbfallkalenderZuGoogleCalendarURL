@@ -102,3 +102,42 @@ def test_feed_has_24h_edge_cache(app_server):
 def test_api_has_edge_cache(app_server):
     r = requests.get(app_server + "/api/cities", timeout=10)
     assert "s-maxage=86400" in r.headers.get("Cache-Control", "")
+
+
+def test_api_error_responses_not_cached(app_server):
+    """Fehler (z.B. 400/502) dürfen NICHT 24h gecacht werden (sonst bleibt der
+    Picker nach einem transienten ZAW-Ausfall bis zu einem Tag kaputt)."""
+    r = requests.get(app_server + "/api/streets", timeout=10)  # city_id fehlt -> 400
+    assert r.status_code == 400
+    assert r.headers.get("Cache-Control") == "no-store"
+
+
+# --------------------------------------------------------------------------- #
+# Hausnummer -> korrekte Sammelzone (area_id). Verifiziert über den
+# Upstream-Zähler, welche area_id wirklich bei ZAW abgefragt wurde.
+# --------------------------------------------------------------------------- #
+def test_house_number_resolves_to_correct_zone(app_server, mock_zaw_server):
+    counter = mock_zaw_server["counter"]
+
+    # Hausnr. 1 -> Zone 201, NICHT die Straßen-Fallback-Zone 200
+    zaw_ics_gen.clear_cache()
+    counter.reset()
+    requests.get(app_server + "/feed",
+                 params={"city": "Testheim", "street": "Hauptstraße", "nr": "1"}, timeout=10)
+    snap = counter.snapshot()
+    assert "dates:100:201" in snap, snap
+    assert "dates:100:200" not in snap, snap
+
+    # andere Hausnummer -> andere Zone
+    zaw_ics_gen.clear_cache()
+    counter.reset()
+    requests.get(app_server + "/feed",
+                 params={"city": "Testheim", "street": "Hauptstraße", "nr": "5"}, timeout=10)
+    assert "dates:100:205" in counter.snapshot()
+
+    # unbekannte Hausnummer -> Straßen-Fallback-Zone 200
+    zaw_ics_gen.clear_cache()
+    counter.reset()
+    requests.get(app_server + "/feed",
+                 params={"city": "Testheim", "street": "Hauptstraße", "nr": "999"}, timeout=10)
+    assert "dates:100:200" in counter.snapshot()

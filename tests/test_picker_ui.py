@@ -16,7 +16,7 @@ from urllib.parse import urlencode, urlparse, parse_qs
 
 import requests
 import pytest
-from playwright.sync_api import expect
+from playwright.sync_api import expect, TimeoutError as PlaywrightTimeout
 
 from icsutil import unfold
 
@@ -140,9 +140,10 @@ def test_exhaustive_url_generation(app_server, page):
                   const pf = new URL(prefill.href);
                   if (pf.search !== u.search) errs.push('prefill query mismatch');
                   if (pf.pathname !== '/') errs.push('prefill path');
-                  // gcal kapselt die enkodierte Feed-URL
-                  const wantGcal = 'https://calendar.google.com/calendar/u/0/r/settings/addbyurl?url=' + encodeURIComponent(feed);
-                  if (gcal.href !== wantGcal) errs.push('gcal href');
+                  // gcal verweist auf die statische "Per URL hinzufügen"-Seite
+                  // (Google prefüllt url= nicht zuverlässig; wir kopieren stattdessen)
+                  if (gcal.href !== 'https://calendar.google.com/calendar/u/0/r/settings/addbyurl')
+                    errs.push('gcal href ' + gcal.href);
                   if (errs.length) fails.push({mask, ev, mo, errs});
                 }
               }
@@ -248,6 +249,63 @@ def test_prefill_roundtrip(app_server, page, case):
 # --------------------------------------------------------------------------- #
 # Gemeinde ohne Straßen
 # --------------------------------------------------------------------------- #
+def test_preview_renders_feed_events(app_server, page):
+    """Die FullCalendar-Vorschau lädt die Feed-URL und rendert Termine.
+
+    Übersprungen, falls das CDN im Test-Netz nicht erreichbar ist.
+    """
+    _open(page, app_server)
+    _pick_address_with_hn(page)
+    page.click("#btn-preview")
+    try:
+        # FullCalendar rendert seine Toolbar in #calendar (Klasse fc-toolbar)
+        page.wait_for_function(
+            "typeof FullCalendar !== 'undefined' "
+            "&& typeof ICAL !== 'undefined' "
+            "&& document.querySelector('#calendar .fc-toolbar')", timeout=20000)
+    except PlaywrightTimeout:
+        pytest.skip("FullCalendar-CDN im Test-Netz nicht erreichbar")
+
+    assert page.is_visible("#calendar .fc-toolbar")  # FullCalendar gerendert
+
+    # Verifiziert, dass unser Feed wirklich in Events geparst wird (eigene
+    # listYear-Instanz, unabhängig von der gerade sichtbaren Monatsansicht).
+    feed = page.text_content("#url-box")
+    count = page.evaluate(
+        """async (url) => {
+            const el = document.createElement('div');
+            document.body.appendChild(el);
+            const cal = new FullCalendar.Calendar(el, {
+                initialView: 'listYear', events: { url, format: 'ics' } });
+            cal.render();
+            for (let i = 0; i < 60; i++) {
+                if (cal.getEvents().length > 0) break;
+                await new Promise(r => setTimeout(r, 100));
+            }
+            const n = cal.getEvents().length;
+            cal.destroy(); el.remove();
+            return n;
+        }""", feed)
+    assert count > 0, "Vorschau lud keine Events aus dem Feed"
+
+
+def _result_visible(page):
+    return page.eval_on_selector("#result", "e => e.classList.contains('visible')")
+
+
+def test_clearing_city_resets_stale_result(app_server, page):
+    """Nach Leeren der Gemeinde darf das Anpassen eines Erinnerungs-Dropdowns
+    nicht das Ergebnis der ALTEN Adresse wieder einblenden."""
+    _open(page, app_server)
+    _pick_address_with_hn(page)
+    assert _result_visible(page)
+
+    page.select_option("#city", value="")          # zurück auf "-- Gemeinde wählen --"
+    assert not _result_visible(page)
+    page.select_option("#eve-time", value="21:00")  # Erinnerungs-Dropdown anfassen
+    assert not _result_visible(page), "veraltetes Ergebnis erschien erneut"
+
+
 def test_city_without_streets_ui(app_server, page):
     _open(page, app_server)
     page.select_option("#city", label="Inselstadt")
