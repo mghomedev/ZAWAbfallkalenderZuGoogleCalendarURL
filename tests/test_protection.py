@@ -47,6 +47,50 @@ def test_cache_shared_between_feed_and_picker_apis(app_server, mock_zaw_server):
     assert counter.snapshot().get("cities_web", 0) == 1
 
 
+def test_cache_expires_after_24h(monkeypatch):
+    """Pflicht-Anforderung: der ZAW-Cache wird nach max. 24h verworfen.
+
+    Deterministisch über eine gefälschte monotone Uhr – innerhalb 24h kommt die
+    Antwort aus dem Cache, knapp danach MUSS erneut upstream abgefragt werden.
+    """
+    zaw_ics_gen.clear_cache()
+    monkeypatch.delenv("ZAW_CACHE_TTL", raising=False)  # Default 86400 (24h)
+
+    calls = {"n": 0}
+
+    class _Resp:
+        def __init__(self, d):
+            self._d = d
+
+        def json(self):
+            return self._d
+
+    class _Getter:
+        def get(self, url, params=None, timeout=None):
+            calls["n"] += 1
+            return _Resp({"call": calls["n"]})
+
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(zaw_ics_gen.time, "monotonic", lambda: clock["t"])
+
+    g = _Getter()
+    params = {"r": "cities_web"}
+
+    # 1) erster Abruf -> upstream, Ablauf = 1000 + 86400
+    zaw_ics_gen.cached_get_json(g, "http://zaw.test/api", params)
+    assert calls["n"] == 1
+
+    # 2) kurz vor Ablauf (23:59:59) -> aus dem Cache, KEIN upstream
+    clock["t"] = 1000.0 + 86399
+    zaw_ics_gen.cached_get_json(g, "http://zaw.test/api", params)
+    assert calls["n"] == 1, "innerhalb 24h muss aus dem Cache kommen"
+
+    # 3) nach 24h -> Cache verfallen -> erneut upstream
+    clock["t"] = 1000.0 + 86401
+    zaw_ics_gen.cached_get_json(g, "http://zaw.test/api", params)
+    assert calls["n"] == 2, "nach 24h muss der Cache verworfen sein"
+
+
 def test_cache_can_be_disabled(app_server, mock_zaw_server, monkeypatch):
     counter = mock_zaw_server["counter"]
     monkeypatch.setenv("ZAW_CACHE_TTL", "0")

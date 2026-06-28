@@ -265,7 +265,8 @@ INDEX_HTML = r"""<!DOCTYPE html>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 2rem 1rem; }
   h1 { font-size: 1.5rem; margin-bottom: .25rem; text-align: center; }
-  .subtitle { color: var(--muted); font-size: .9rem; margin-bottom: 2rem; text-align: center; }
+  .subtitle { color: var(--muted); font-size: .9rem; margin-bottom: 1rem; text-align: center; }
+  .tagline { max-width: 580px; font-size: 1.2rem; font-weight: 600; line-height: 1.45; text-align: center; color: var(--text); margin-bottom: 2rem; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 2rem; width: 100%; max-width: 520px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
   label { display: block; font-weight: 600; font-size: .85rem; margin-bottom: .35rem; margin-top: 1.25rem; }
   label:first-child { margin-top: 0; }
@@ -282,11 +283,13 @@ INDEX_HTML = r"""<!DOCTYPE html>
   .result { display: none; margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
   .result.visible { display: block; }
   .url-box { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: .6rem .75rem; font-family: monospace; font-size: .78rem; word-break: break-all; margin: .75rem 0; user-select: all; }
+  .url-warn { margin: .5rem 0 .25rem; padding: .55rem .7rem; font-size: .78rem; line-height: 1.4; color: #92400e; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px; }
   .buttons { display: flex; gap: .75rem; margin-top: 1rem; flex-wrap: wrap; }
   .btn { flex: 1; min-width: 140px; padding: .7rem 1rem; border: none; border-radius: 8px; font-size: .85rem; font-weight: 600; cursor: pointer; text-align: center; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: .4rem; transition: opacity .15s; }
   .btn:hover { opacity: .85; }
   .btn-copy { background: var(--accent); color: #fff; }
   .btn-gcal { background: #16a34a; color: #fff; }
+  .btn-dl { background: #475569; color: #fff; }
   .spinner { display: none; width: 1rem; height: 1rem; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; margin-left: .5rem; vertical-align: middle; }
   .spinner.active { display: inline-block; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -294,6 +297,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
   .prefill-link { display: block; margin-top: .75rem; font-size: .8rem; color: var(--muted); text-align: center; text-decoration: underline; cursor: pointer; }
   .prefill-link:hover { color: var(--accent); }
   .disclaimer { max-width: 520px; margin-top: 2rem; padding: 1rem; font-size: .72rem; color: var(--muted); line-height: 1.5; text-align: center; }
+  .privacy { max-width: 520px; margin-top: 1.5rem; padding: 1rem; font-size: .78rem; color: var(--muted); line-height: 1.5; text-align: center; background: var(--card); border: 1px solid var(--border); border-radius: 8px; }
   .note { margin-top: 1rem; font-size: .8rem; color: var(--muted); line-height: 1.4; }
   .how-to { max-width: 520px; margin-top: 1.5rem; }
   .how-to summary { cursor: pointer; font-weight: 600; font-size: .9rem; color: var(--accent); }
@@ -323,6 +327,8 @@ INDEX_HTML = r"""<!DOCTYPE html>
 
 <h1>ZAW Abfallkalender zu Google Calendar URL</h1>
 <p class="subtitle">Abfuhrtermine als abonnierbare Kalender-URL</p>
+<p class="tagline">Abfallkalender f&uuml;r den Landkreis Darmstadt-Dieburg (ZAW) live f&uuml;r
+  deine Adresse in deinen Kalender synchronisieren (Google Kalender, Outlook, als iCal etc.)</p>
 
 <div class="card">
   <label for="city">Gemeinde</label>
@@ -374,10 +380,19 @@ INDEX_HTML = r"""<!DOCTYPE html>
   <div id="result" class="result">
     <label>Deine Kalender-URL</label>
     <div id="url-box" class="url-box"></div>
+    <div class="url-warn">
+      <strong>Achtung:</strong> Die URLs selbst k&ouml;nnen die individuelle Adresse enthalten
+      &ndash; bitte vorsichtig damit umgehen und &uuml;berlegen, wem man diese gibt.
+      <br><br>
+      <strong>Tipp:</strong> Wenn du nicht m&ouml;chtest, dass genau deine Adresse benutzt wird,
+      kannst du auch eine Adresse in der N&auml;he w&auml;hlen &ndash; z.B. ein st&auml;dtisches
+      Geb&auml;ude / B&uuml;rgerhaus mit &auml;hnlichem Abfuhrrhythmus wie deine Adresse.
+    </div>
     <div class="buttons">
       <button class="btn btn-copy" id="btn-copy" onclick="copyUrl()">In Zwischenablage kopieren</button>
       <a class="btn btn-gcal" id="btn-gcal" href="#" target="_blank" rel="noopener"
          onclick="gcalClick()">Zu Google Kalender hinzuf&uuml;gen</a>
+      <a class="btn btn-dl" id="btn-dl" href="#" download="abfall.ics">&#x2B07; iCal herunterladen</a>
     </div>
     <p id="gcal-hint" class="gcal-hint">Google fragt nach der URL &ndash; sie wird beim Klick
       <strong>automatisch kopiert</strong>, also im ge&ouml;ffneten Google-Feld einfach
@@ -416,6 +431,14 @@ INDEX_HTML = r"""<!DOCTYPE html>
   </p>
 </details>
 
+<div class="privacy">
+  <strong>Datenschutz:</strong> Diese Seite sammelt <strong>keine Daten</strong> &uuml;ber dich.
+  Zum Schutz der ZAW-Server wird lediglich ein technischer <strong>24-Stunden-Cache</strong> der
+  ZAW-Antworten genutzt, damit das ZAW-API nicht &uuml;berlastet wird; dieser Cache wird nach
+  24&nbsp;Stunden wieder gel&ouml;scht. Es wird das <strong>ZAW-API</strong> verwendet &ndash;
+  &uuml;ber dessen Verf&uuml;gbarkeit und Verhalten k&ouml;nnen keine Aussagen gemacht werden.
+</div>
+
 <div class="disclaimer">
   Dieser Code wurde von Claude Code erzeugt und ist ein reines Hobby-Projekt ohne jegliche
   Kooperation mit ZAW. Jegliche Nutzung ist auf eigene Gefahr, ohne jegliche Garantie auf
@@ -442,6 +465,7 @@ const resultEl = document.getElementById("result");
 const urlBox = document.getElementById("url-box");
 const btnGcal = document.getElementById("btn-gcal");
 const btnCopy = document.getElementById("btn-copy");
+const btnDl = document.getElementById("btn-dl");
 const btnPrefill = document.getElementById("btn-prefill");
 
 // Pre-fill eve/morn from URL
@@ -673,6 +697,11 @@ function updateUrl() {
   // "Per URL hinzufügen"-Seite und kopieren die Feed-URL in die Zwischenablage,
   // damit der Nutzer sie dort nur noch einfügen muss.
   btnGcal.href = "https://calendar.google.com/calendar/u/0/r/settings/addbyurl";
+  // Download: gleiche Feed-URL, aber als .ics-Datei speichern (same-origin ->
+  // das download-Attribut erzwingt den Download statt eines Abos).
+  btnDl.href = url;
+  const fnameParts = [currentCity, currentStreet, currentNr].filter(Boolean).join("_");
+  btnDl.download = ("Abfall_" + fnameParts).replace(/[^\w.-]+/g, "_") + ".ics";
   btnPrefill.href = BASE + "/?" + p.toString();
   resultEl.classList.add("visible");
   btnCopy.textContent = "In Zwischenablage kopieren";

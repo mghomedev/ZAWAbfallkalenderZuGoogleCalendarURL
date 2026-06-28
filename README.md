@@ -1,5 +1,7 @@
 # ZAWAbfallkalenderZuGoogleCalendarURL
 
+## Abfallkalender für den Landkreis Darmstadt-Dieburg (ZAW) live für deine Adresse in deinen Kalender synchronisieren (Google Kalender, Outlook, als iCal etc.)
+
 Konvertiert die ZAW-Abfuhrtermine (Landkreis Darmstadt-Dieburg) in eine
 abonnierbare Google-Kalender-URL. Gehostet als **Vercel Serverless Function** --
 die Adresse wird einfach als URL-Parameter uebergeben.
@@ -23,7 +25,8 @@ die Adresse wird einfach als URL-Parameter uebergeben.
 4. Optional: **Vorschau** anzeigen -- die Termine erscheinen direkt auf der Seite,
    je Abfalltyp in der **exakten ZAW-Farbe** (Bio gruen, Papier blau, Gelber Sack
    gelb, Restmuell schwarz/grau, Schadstoff rot)
-5. Klicke **"Zu Google Kalender hinzufuegen"** (URL wird kopiert) oder kopiere die URL
+5. Klicke **"Zu Google Kalender hinzufuegen"** (URL wird kopiert), kopiere die URL,
+   oder lade die **`.ics`-Datei herunter** ("iCal herunterladen")
 
 Pro Abholung entstehen bis zu **zwei** Kalender-Eintraege:
 
@@ -40,6 +43,21 @@ Feiertagen) erscheinen daher spaetestens nach ~24 h plus Googles Poll-Intervall
 
 > **Hinweis:** Google ignoriert VALARM in abonnierten Kalendern. Die Vorabend-Eintraege
 > sind sichtbar, piepen aber nicht. Apple Kalender und Thunderbird ehren VALARM.
+
+### Datenschutz
+
+Diese Seite **sammelt keine Daten** ueber dich. Zum Schutz der ZAW-Server wird lediglich
+ein technischer **24-Stunden-Cache** der ZAW-Antworten genutzt, damit das ZAW-API nicht
+ueberlastet wird; dieser Cache wird **nach 24 Stunden wieder geloescht**. Es wird das
+**ZAW-API** verwendet -- ueber dessen Verfuegbarkeit und Verhalten koennen keine Aussagen
+gemacht werden.
+
+> **Achtung:** Die URLs selbst koennen die individuelle Adresse enthalten -- bitte
+> vorsichtig damit umgehen und ueberlegen, wem man diese gibt.
+>
+> **Tipp:** Wenn du nicht moechtest, dass genau deine Adresse benutzt wird, kannst du auch
+> eine Adresse in der Naehe waehlen -- z.B. ein staedtisches Gebaeude / Buergerhaus mit
+> aehnlichem Abfuhrrhythmus wie deine Adresse.
 
 ---
 

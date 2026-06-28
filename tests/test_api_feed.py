@@ -100,6 +100,40 @@ def test_landing_page_gcal_button_static(app_server):
     assert 'onclick="gcalClick()"' in html
 
 
+def test_landing_page_has_download_button(app_server):
+    """Es gibt einen einfachen Download-Button (download-Attribut -> .ics-Datei)."""
+    html = requests.get(app_server + "/", timeout=10).text
+    assert 'id="btn-dl"' in html
+    assert "download=" in html
+
+
+def test_landing_page_has_tagline(app_server):
+    """Prominente Überschrift mit dem Nutzenversprechen ist vorhanden."""
+    html = requests.get(app_server + "/", timeout=10).text
+    assert 'class="tagline"' in html
+    assert "Landkreis Darmstadt-Dieburg" in html
+    assert "synchronisieren" in html
+
+
+def test_landing_page_privacy_and_cache_note(app_server):
+    """Pflicht-Hinweis: keine Datensammlung + 24h-Cache der nach 24h gelöscht wird
+    + Drittquelle ZAW ohne Zusagen."""
+    html = requests.get(app_server + "/", timeout=10).text
+    assert 'class="privacy"' in html
+    assert "keine Daten" in html.replace("&nbsp;", " ")
+    assert "24" in html  # 24-Stunden-Cache
+    assert "ZAW-API" in html
+
+
+def test_landing_page_url_address_warning(app_server):
+    """Pflicht-Warnung: URLs können die Adresse enthalten + Nachbar-Adresse-Tipp."""
+    html = requests.get(app_server + "/", timeout=10).text
+    assert 'class="url-warn"' in html
+    assert "Adresse enthalten" in html
+    assert "wem man diese gibt" in html
+    assert "in der N" in html  # "in der Nähe wählen" (Tipp)
+
+
 # --------------------------------------------------------------------------- #
 # Feed: Pflichtparameter & Fehlerfälle
 # --------------------------------------------------------------------------- #

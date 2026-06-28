@@ -65,8 +65,16 @@ Mehrschichtiger Schutz gegen Überlastung von App **und** ZAW-Backend:
   (Default 120), sonst 429. Best-effort (serverless: nur pro Instanz).
 - **robots.txt** verbietet Crawlern `/api/` und `/feed`.
 - Produktion zusätzlich: **Vercel Firewall/WAF** im Dashboard (harte Schranke).
+- **Pflicht – keine Datensammlung:** Die App speichert/loggt KEINE Nutzer- oder
+  Adressdaten. Einziger Speicher ist der technische ZAW-Antwort-Cache; Einträge
+  verfallen nach **max. 24h** (`_cache_ttl()` Default 86400) und werden dann durch
+  einen frischen ZAW-Abruf ersetzt (effektiv: nach 24h verworfen). Diese Aussage
+  steht 1:1 als Hinweis auf der App-Seite (`.privacy`) und in der README.
+- **Pflicht – Drittquelle ZAW:** Es wird das ZAW-API genutzt; über dessen
+  Verfügbarkeit/Verhalten werden keine Zusagen gemacht (siehe Disclaimer).
 Env-Knöpfe: `ZAW_CACHE_TTL`, `ZAW_RATE_PER_MIN`, `ZAW_API_BASE` (Tests/Mock).
-Cache/Rate sind durch `tests/test_protection.py` abgedeckt (Mock zählt Upstream).
+Cache/Rate/24h-Ablauf sind durch `tests/test_protection.py` abgedeckt (Mock zählt
+Upstream; `test_cache_expires_after_24h` beweist deterministisch den 24h-Verfall).
 
 ## Tests (vor dem Deploy)
 Offline-Selbsttest mit Mock-ZAW + echter Function + headless Chromium:

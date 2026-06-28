@@ -108,6 +108,7 @@ def test_exhaustive_url_generation(app_server, page):
             const box = document.getElementById('url-box');
             const prefill = document.getElementById('btn-prefill');
             const gcal = document.getElementById('btn-gcal');
+            const dl = document.getElementById('btn-dl');
             const fails = [];
             let total = 0;
             for (let mask = 0; mask < (1 << cbs.length); mask++) {
@@ -144,6 +145,9 @@ def test_exhaustive_url_generation(app_server, page):
                   // (Google prefüllt url= nicht zuverlässig; wir kopieren stattdessen)
                   if (gcal.href !== 'https://calendar.google.com/calendar/u/0/r/settings/addbyurl')
                     errs.push('gcal href ' + gcal.href);
+                  // Download-Button zeigt immer auf die aktuelle Feed-URL (.ics)
+                  if (dl.href !== feed) errs.push('dl href ' + dl.href);
+                  if (!(dl.getAttribute('download') || '').endsWith('.ics')) errs.push('dl filename');
                   if (errs.length) fails.push({mask, ev, mo, errs});
                 }
               }
@@ -385,6 +389,24 @@ def test_preview_colors_events_like_zaw(app_server, page):
     rest_2w = next(c for t, c in titles.items() if "14-täglich" in t)
     rest_w = next(c for t, c in titles.items() if "wöchentlich" in t)
     assert rest_2w != rest_w, f"Restmüll-Typen gleich gefärbt: {rest_2w}"
+
+
+def test_download_button_serves_ics(app_server, page):
+    """Der 'iCal herunterladen'-Button zeigt auf die aktuelle Feed-URL und
+    erzwingt via download-Attribut eine .ics-Datei (same-origin)."""
+    _open(page, app_server)
+    _pick_address_with_hn(page)
+    info = page.eval_on_selector(
+        "#btn-dl", "e => ({href: e.href, dl: e.getAttribute('download')})")
+    feed = page.text_content("#url-box")
+    assert info["href"] == feed, f"Download zeigt nicht auf die Feed-URL: {info['href']}"
+    assert info["dl"].endswith(".ics")
+    assert "Testheim" in info["dl"]  # sprechender Dateiname
+    # die verlinkte Datei ist wirklich ein gültiger ICS-Kalender
+    r = requests.get(info["href"], timeout=10)
+    assert r.status_code == 200
+    assert r.headers["Content-Type"].startswith("text/calendar")
+    assert "BEGIN:VCALENDAR" in r.text
 
 
 # --------------------------------------------------------------------------- #
